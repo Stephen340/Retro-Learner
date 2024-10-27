@@ -133,6 +133,10 @@ venv.bak/
 /.idea
 idea/
 
+# ROMs
+ROMs/
+ROMs
+
 # Spyder project settings
 .spyderproject
 .spyproject
