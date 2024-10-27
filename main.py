@@ -1,4 +1,20 @@
-# import retro
+import retro
+# print(retro.data.list_games())
+
+
+def main():
+    env = retro.make(game='SuperMarioBros-Nes')
+    obs = env.reset()
+    while True:
+        obs, rew, done, info = env.step(env.action_space.sample())
+        env.render()
+        if done:
+            obs = env.reset()
+    env.close()
+
+
+if __name__ == "__main__":
+    main()
 # retro.import('path_to_roms_directory')
 # env = retro.make(game='SuperMarioBros-Nes')  # Example for Mario
 #
@@ -55,7 +71,3 @@
 #             state = env.reset()
 #         else:
 #             state = next_state
-
-
-import retro
-env = retro.make(game='Airstriker-Genesis')
