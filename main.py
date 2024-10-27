@@ -1,7 +1,8 @@
 import retro
+print(retro.data.list_games())
 
 def main():
-    env = retro.make(game='Airstriker-Genesis')
+    env = retro.make(game='BubsyInClawsEncountersOfTheFurredKind-Genesis')
     obs = env.reset()
     while True:
         obs, rew, done, info = env.step(env.action_space.sample())
