@@ -70,17 +70,52 @@ def train(agent, env, demo_replay_buffer, max_steps=10000):
             state = next_state
 
 def main():
-    env = retro.make(game='SuperMarioBros-Nes')
+    env = retro.make(game='SuperMarioBros-Nes', record='D:/')
     obs = env.reset()
+    lastLivesNum = 3
     while True:
         # obs, rew, done, info = env.step(env.action_space.sample())
         obs, rew, done, info = env.step(np.array([0, 0, 0, 0, 0, 0, 0, 1, 1]))
         env.render()
         sleep(0.01)
+        if info['lives'] < lastLivesNum:
+            print("Death")
+            lastLivesNum = info['lives']
         if done:
             obs = env.reset()
+            break
     env.close()
 
+# main2: replay the file
+def main2():
+    # TODO: set the file path to match where you recorded the file
+    movie = retro.Movie('D:/SuperMarioBros-Nes-Level1-1-000000.bk2')
+    movie.step()
+
+    env = retro.make(
+        game=movie.get_game(),
+        state=None,
+        # bk2s can contain any button presses, so allow everything
+        use_restricted_actions=retro.Actions.ALL,
+        players=movie.players,
+    )
+    env.initial_state = movie.get_state()
+    env.reset()
+
+    while movie.step():
+        keys = []
+        for p in range(movie.players):
+            for i in range(env.num_buttons):
+                keys.append(movie.get_key(i, p))
+        # Note: The action space is stored in the keys variable itself.
+        # The keys is an array of 9 booleans, each mapping to an action (move right, jump, etc.)
+        # True = Key is pressed and action is being used; False otherwise
+        obs, rew, done, info = env.step(keys)
+        env.render()
+        sleep(0.01)
+
 if __name__ == "__main__":
-    main()
+    # main() use agent
+    # main2()
+    main2()
 
