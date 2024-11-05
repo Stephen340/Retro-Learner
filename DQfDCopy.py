@@ -4,45 +4,42 @@ from collections import deque
 import retro
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 from time import sleep
 from torch.optim import AdamW
 
 
-class QFunction(nn.Module):
-    """
-    Q-network definition.
-    """
+class CustomCNN(nn.Module):
+    def __init__(self, observation_space, action_space):
+        super(CustomCNN, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(224, 32, 8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, 3, stride=1),
+            nn.ReLU()
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(7 * 7 * 64, 512),
+            nn.ReLU(),
+            nn.Linear(512, action_space.n)
+        )
 
-    def __init__(
-            self,
-            obs_dim,
-            act_dim,
-            hidden_sizes,
-    ):
-        super().__init__()
-        sizes = [obs_dim] + hidden_sizes + [act_dim]
-        self.layers = nn.ModuleList()
-        for i in range(len(sizes) - 1):
-            self.layers.append(nn.Linear(sizes[i], sizes[i + 1]))
-
-    def forward(self, obs):
-        x = torch.cat([obs], dim=-1)
-        for i in range(len(self.layers) - 1):
-            x = F.relu(self.layers[i](x))
-        return self.layers[-1](x).squeeze(dim=-1)
+    def forward(self, x):
+        x = self.conv(x)
+        x = x.view(x.size(0), -1)
+        return self.fc(x)
 
 
 class DQN():
     def __init__(self, env, movie):
-        super().__init__(env, movie)
         # Create Q-network
-        self.model = QFunction(
-            [224, 240, 3], # State space
-            9, # Action space
-            [64, 64],
-        )
+        # self.model = QFunction(
+        #     [224, 240, 3], # State space
+        #     9,  # Action space
+        #     [64, 64],
+        # )
         # Create target Q-network
         self.target_model = deepcopy(self.model)
         # Set up the optimizer
