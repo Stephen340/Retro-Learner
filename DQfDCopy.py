@@ -35,17 +35,12 @@ class QFunction(nn.Module):
 
 
 class DQN():
-    def __init__(self, env, eval_env, options):
-        assert str(env.action_space).startswith("Discrete") or str(
-            env.action_space
-        ).startswith("Tuple(Discrete"), (
-                str(self) + " cannot handle non-discrete action spaces"
-        )
-        super().__init__(env, eval_env, options)
+    def __init__(self, env, movie):
+        super().__init__(env, movie)
         # Create Q-network
         self.model = QFunction(
-            env.observation_space.shape[0],
-            env.action_space.n,
+            [224, 240, 3], # State space
+            9, # Action space
             [64, 64],
         )
         # Create target Q-network
@@ -62,7 +57,7 @@ class DQN():
             p.requires_grad = False
 
         # Replay buffer
-        self.replay_memory = deque(maxlen=options.replay_memory_size)
+        self.replay_memory = deque(maxlen=300000) # Max replay size
 
         # Number of training steps so far
         self.n_steps = 0
@@ -217,29 +212,25 @@ class DQN():
 
         # Reset the environment
         state, _ = self.env.reset()
-        testing = False
+        previnfo = None
 
         for _ in range(131072):  # Self.options.steps
             # Get action
-            if testing:
+            if movie is None:
                 probabilities = self.epsilon_greedy(state)
                 chosen_action = np.random.choice(np.arange(len(probabilities)), p=probabilities)
                 next_state, reward, done, _ = env.step(chosen_action)
+                if previnfo is not None:
+                    print(self.myreward(info, previnfo))
+                    reward = self.myreward(info, previnfo)
+                else:
+                    reward = 0
+                sleep(0.01)
+                previnfo = info
             else:
-                movie = retro.Movie('C:/Users/stjoh/Documents/CSCE 642/d.bk2')
-                movie.step()
-
-                env = retro.make(
-                    game=movie.get_game(),
-                    state=None,
-                    # bk2s can contain any button presses, so allow everything
-                    use_restricted_actions=retro.Actions.ALL,
-                    players=movie.players,
-                )
                 env.initial_state = movie.get_state()
                 state = movie.get_state()
                 next_state, reward, done, info, chosen_action = None, None, None, None, None
-                previnfo = None
                 while movie.step():
                     chosen_action = []
                     for p in range(movie.players):
@@ -257,18 +248,17 @@ class DQN():
                     else:
                         reward = 0
                     sleep(0.01)
+                    # Memorize and replay
+                    self.memorize(state, chosen_action, reward, next_state, done)
+                    self.replay()
+                    if done:
+                        break
+                    # Set state, update target model if needed, increment step count
+                    state = next_state
+                    if self.n_steps % 100 == 0:
+                        self.update_target_model()
+                    self.n_steps += 1
                     previnfo = info
-
-            # Memorize and replay
-            self.memorize(state, chosen_action, reward, next_state, done)
-            self.replay()
-            if done:
-                break
-            # Set state, update target model if needed, increment step count
-            state = next_state
-            if self.n_steps % 100 == 0:
-                self.update_target_model()
-            self.n_steps += 1
 
     def __str__(self):
         return "DQN"
@@ -289,3 +279,16 @@ class DQN():
             return torch.argmax(q_values).detach().numpy()
 
         return policy_fn
+
+
+movie = retro.Movie('C:/Users/stjoh/Documents/CSCE 642/MarkGameplay.bk2')
+movie.step()
+
+env = retro.make(
+    game=movie.get_game(),
+    state=None,
+    # bk2s can contain any button presses, so allow everything
+    use_restricted_actions=retro.Actions.ALL,
+    players=movie.players,
+)
+dqn = DQN(env, movie)
