@@ -10,7 +10,7 @@ from torch.optim import AdamW
 
 
 class CustomCNN(nn.Module):
-    def __init__(self, observation_space, action_space):
+    def __init__(self, action_space):
         super(CustomCNN, self).__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(224, 32, 8, stride=4),
@@ -23,7 +23,7 @@ class CustomCNN(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(7 * 7 * 64, 512),
             nn.ReLU(),
-            nn.Linear(512, action_space.n)
+            nn.Linear(512, action_space)
         )
 
     def forward(self, x):
@@ -32,14 +32,12 @@ class CustomCNN(nn.Module):
         return self.fc(x)
 
 
-class DQN():
+class DQN:
     def __init__(self, env, movie):
-        # Create Q-network
-        # self.model = QFunction(
-        #     [224, 240, 3], # State space
-        #     9,  # Action space
-        #     [64, 64],
-        # )
+        # Create CNN
+        self.movie = movie
+        self.env = env
+        self.model = CustomCNN(9)  # Action space
         # Create target Q-network
         self.target_model = deepcopy(self.model)
         # Set up the optimizer
@@ -208,7 +206,7 @@ class DQN():
         """
 
         # Reset the environment
-        state, _ = self.env.reset()
+        state = self.env.reset()
         previnfo = None
 
         for _ in range(131072):  # Self.options.steps
@@ -289,3 +287,4 @@ env = retro.make(
     players=movie.players,
 )
 dqn = DQN(env, movie)
+dqn.train_episode()
