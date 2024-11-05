@@ -73,9 +73,13 @@ def main():
     env = retro.make(game='SuperMarioBros-Nes', record='D:/')
     obs = env.reset()
     lastLivesNum = 3
+    previnfo = None
     while True:
         # obs, rew, done, info = env.step(env.action_space.sample())
         obs, rew, done, info = env.step(np.array([0, 0, 0, 0, 0, 0, 0, 1, 1]))
+        if previnfo is not None:
+            print(myreward(info, previnfo))
+
         env.render()
         sleep(0.01)
         if info['lives'] < lastLivesNum:
@@ -84,12 +88,32 @@ def main():
         if done:
             obs = env.reset()
             break
+        previnfo = info
     env.close()
+
+def myreward(info, previnfo):
+    # NOTE FOR STEVEN: Make sure you update data.json or x_position2 will not be found
+
+    # previous
+    pxpos = previnfo['x_position2'] + previnfo['xscrollLo'] + 256 * previnfo['xscrollHi']
+    ptime = previnfo['time']
+
+    # now
+    xpos = info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']
+    isDead = info['player_state'] != 8
+    time = info['time']
+
+    # change
+    dpos = xpos - pxpos
+    dtime = time - ptime
+
+    return (-15 if isDead else 0) + dpos + 0.1 * dtime
+
 
 # main2: replay the file
 def main2():
     # TODO: set the file path to match where you recorded the file
-    movie = retro.Movie('D:/SuperMarioBros-Nes-Level1-1-000000.bk2')
+    movie = retro.Movie('C:\\Users\\sturt\\Desktop\\replays\\d.bk2')
     movie.step()
 
     env = retro.make(
@@ -102,6 +126,7 @@ def main2():
     env.initial_state = movie.get_state()
     env.reset()
 
+    previnfo = None
     while movie.step():
         keys = []
         for p in range(movie.players):
@@ -112,10 +137,14 @@ def main2():
         # True = Key is pressed and action is being used; False otherwise
         obs, rew, done, info = env.step(keys)
         env.render()
+        # print(info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi'])
+        if previnfo is not None:
+            print(myreward(info, previnfo))
         sleep(0.01)
+        previnfo = info
 
 if __name__ == "__main__":
     # main() use agent
-    # main2()
-    main2()
+    main()
+    # main()
 
