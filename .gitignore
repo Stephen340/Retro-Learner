@@ -32,6 +32,9 @@ MANIFEST
 *.manifest
 *.spec
 
+# Ignore the model saving because otherwise it's too big
+*.pth
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

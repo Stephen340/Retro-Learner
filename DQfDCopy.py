@@ -79,6 +79,9 @@ class DQN:
 
         # Create target Q-network
         self.target_model = deepcopy(self.model)
+
+
+
         # Set up the optimizer
         self.optimizer = AdamW(
             self.model.parameters(), lr=.001, amsgrad=True
@@ -89,6 +92,9 @@ class DQN:
         # Freeze target network parameters
         for p in self.target_model.parameters():
             p.requires_grad = False
+
+        self.model.to('cuda')
+        self.target_model.to('cuda')
 
         # Replay buffer
         self.replay_memory = deque(maxlen=300000) # Max replay size
@@ -176,6 +182,7 @@ class DQN:
             # Current Q-values
             if states.shape[1] != 3:
                 states = np.transpose(states, (0, 3, 1, 2))
+
             current_q = self.model(states)
             # Q-values for actions in the replay memory
             current_q = torch.gather(
@@ -241,17 +248,18 @@ class DQN:
 
             # Update variables for next step
             state = next_state
+            self.n_steps += 1
             if self.n_steps % 1000 == 0:
                 self.update_target_model()
                 self.save_model("Current_mario.pth")
-            self.n_steps += 1
 
             previnfo = info
 
     def __str__(self):
         return "DQN"
 
-
+if torch.cuda.is_available():
+     torch.set_default_tensor_type(torch.cuda.FloatTensor)
 movie = retro.Movie(os.path.join(os.path.dirname(os.getcwd()), 'd.bk2'))
 movie.step()
 
