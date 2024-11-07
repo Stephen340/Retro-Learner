@@ -243,6 +243,7 @@ class DQN:
             state = next_state
             if self.n_steps % 1000 == 0:
                 self.update_target_model()
+                self.save_model("Current_mario.pth")
             self.n_steps += 1
 
             previnfo = info
