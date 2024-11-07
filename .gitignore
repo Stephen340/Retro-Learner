@@ -132,6 +132,7 @@ venv.bak/
 .idea
 /.idea
 idea/
+ROMs/
 
 # Spyder project settings
 .spyderproject

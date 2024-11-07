@@ -9,8 +9,43 @@ from time import sleep
 from torch.optim import AdamW
 
 
+def convertAct(action):
+    if action[-1] == 1:
+        if action[-2] == 1:
+            return 3
+        elif action[-3] == 1:
+            return 5
+        else:
+            return 2
+    else:
+        if action[-2] == 1:
+            return 1
+        elif action[-3] == 1:
+            return 4
+        else:
+            return 0
+
+def convertActBack(actionID):
+    if actionID == 0:
+        return [0, 0, 0, 0, 0, 0, 0, 0, 0]
+    elif actionID == 1:
+        return [0, 0, 0, 0, 0, 0, 0, 1, 0]
+    elif actionID == 2:
+        return [0, 0, 0, 0, 0, 0, 0, 0, 1]
+    elif actionID == 3:
+        return [0, 0, 0, 0, 0, 0, 0, 1, 1]
+    elif actionID == 4:
+        return [0, 0, 0, 0, 0, 0, 1, 0, 0]
+    elif actionID == 5:
+        return [0, 0, 0, 0, 0, 0, 1, 0, 1]
+    else:
+        print("Unknown actionID", actionID)
+        return [0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+N_ACTIONS = 6
+
 class CustomCNN(nn.Module):
-    def __init__(self, action_space):
+    def __init__(self):
         super(CustomCNN, self).__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels=3, out_channels=32, kernel_size=8, stride=4),
@@ -21,24 +56,22 @@ class CustomCNN(nn.Module):
             nn.ReLU()
         )
         self.fc = nn.Sequential(
-            # nn.Linear(7 * 7 * 64, 512),
-            nn.Linear(3 * 224 * 240, 512),
+            nn.Linear(26 * 24 * 64, 512),
             nn.ReLU(),
-            nn.Linear(512, action_space)
+            nn.Linear(512, N_ACTIONS)
         )
 
     def forward(self, x):
-        # x = self.conv(x)
+        x = self.conv(x)
         x = x.view(x.size(0), -1)
         return self.fc(x)
-
 
 class DQN:
     def __init__(self, env, movie):
         # Create CNN
         self.movie = movie
         self.env = env
-        self.model = CustomCNN(9)  # Action space
+        self.model = CustomCNN()  # Action space
 
         self.movie.step()
         self.env.initial_state = self.movie.get_state()
@@ -88,7 +121,7 @@ class DQN:
         print(f"Model loaded from {path}")
 
     def epsilon_greedy(self, state):
-        nA = self.env.action_space.n
+        nA = N_ACTIONS
         state = torch.as_tensor(state)
         action_values = self.model(state)
         greedy_action = torch.argmax(action_values)
@@ -140,6 +173,8 @@ class DQN:
             dones = torch.as_tensor(dones, dtype=torch.float32)
 
             # Current Q-values
+            if states.shape[1] != 3:
+                states = np.transpose(states, (0, 3, 1, 2))
             current_q = self.model(states)
             # Q-values for actions in the replay memory
             current_q = torch.gather(
@@ -159,6 +194,8 @@ class DQN:
             self.optimizer.step()
 
     def memorize(self, state, action, reward, next_state, done):
+        state = np.transpose(state, (2, 0, 1))
+        next_state = np.transpose(next_state, (2, 0, 1))
         self.replay_memory.append((state, action, reward, next_state, done))
 
     def train_episode(self):
@@ -169,7 +206,8 @@ class DQN:
             # If no movie is loaded, randomly select the next action
             if movie is None:
                 probabilities = self.epsilon_greedy(state)
-                chosen_action = np.random.choice(np.arange(len(probabilities)), p=probabilities)
+                chosen_action_id = np.random.choice(np.arange(len(probabilities)), p=probabilities)
+                chosen_action = convertActBack(chosen_action_id)
 
             # If a movie is loaded, step through the movie instead
             else:
@@ -181,6 +219,7 @@ class DQN:
                 for p in range(movie.players):
                     for i in range(env.num_buttons):
                         chosen_action.append(movie.get_key(i, p))
+                chosen_action_id = convertAct(chosen_action)
 
             # step through the environment with the chosen action
             next_state, reward, done, info = env.step(chosen_action)
@@ -193,7 +232,7 @@ class DQN:
                 reward = 0
 
             # update replay memory & model
-            self.memorize(state, chosen_action, reward, next_state, done)
+            self.memorize(state, chosen_action_id, reward, next_state, done)
             self.replay()
             self.env.render()
             if done:
@@ -201,7 +240,7 @@ class DQN:
 
             # Update variables for next step
             state = next_state
-            if self.n_steps % 100 == 0:
+            if self.n_steps % 1000 == 0:
                 self.update_target_model()
             self.n_steps += 1
 
