@@ -13,21 +13,22 @@ class CustomCNN(nn.Module):
     def __init__(self, action_space):
         super(CustomCNN, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(224, 32, 8, stride=4),
+            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=8, stride=4),
             nn.ReLU(),
-            nn.Conv2d(32, 64, 4, stride=2),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2),
             nn.ReLU(),
-            nn.Conv2d(64, 64, 3, stride=1),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
             nn.ReLU()
         )
         self.fc = nn.Sequential(
-            nn.Linear(7 * 7 * 64, 512),
+            # nn.Linear(7 * 7 * 64, 512),
+            nn.Linear(3 * 224 * 240, 512),
             nn.ReLU(),
             nn.Linear(512, action_space)
         )
 
     def forward(self, x):
-        x = self.conv(x)
+        # x = self.conv(x)
         x = x.view(x.size(0), -1)
         return self.fc(x)
 
@@ -38,6 +39,10 @@ class DQN:
         self.movie = movie
         self.env = env
         self.model = CustomCNN(9)  # Action space
+
+        self.movie.step()
+        self.env.initial_state = self.movie.get_state()
+
         # Create target Q-network
         self.target_model = deepcopy(self.model)
         # Set up the optimizer
@@ -83,70 +88,38 @@ class DQN:
         print(f"Model loaded from {path}")
 
     def epsilon_greedy(self, state):
-        """
-        Apply an epsilon-greedy policy based on the given Q-function approximator and epsilon.
-
-        Returns:
-            The probabilities (as a Numpy array) associated with each action for 'state'.
-
-        Use:
-            self.env.action_space.n: Number of avilable actions
-            self.torch.as_tensor(state): Convert Numpy array ('state') to a tensor
-            self.model(state): Returns the predicted Q values at a
-                'state' as a tensor. One value per action.
-            torch.argmax(values): Returns the index corresponding to the highest value in
-                'values' (a tensor)
-        """
         nA = self.env.action_space.n
-        # Convert to tensor and get the predicted Q values
         state = torch.as_tensor(state)
         action_values = self.model(state)
-        # Get the greedy action
         greedy_action = torch.argmax(action_values)
-        # List of probs, initialized as the eps/len(AcSpace)
         probability_per_action = np.ones(nA) * (0.90 / nA)  # .90 is greedy epsilon. Chance of random exploration
         # Update the greedy action appropriately
         probability_per_action[greedy_action] = 1.0 - .90 + .90 / nA
         return probability_per_action
 
     def compute_target_values(self, next_states, rewards, dones):
-        """
-        Computes the target q values.
-
-        Returns:
-            The target q value (as a tensor) of shape [len(next_states)]
-        """
         next_q_vals = self.target_model(next_states)
         best_next_q_vals = torch.max(next_q_vals, dim=1)[0]  # Get max qs for each state
         target = rewards + 0.9 * best_next_q_vals * (1 - dones)  # self.options.gamma is 0.9
         return torch.as_tensor(target)
 
     def myreward(self, info, previnfo):
-        # NOTE: Make sure you update data.json or x_position2 will not be found
-
-        # previous
+        # previous state
         pxpos = previnfo['x_position2'] + previnfo['xscrollLo'] + 256 * previnfo['xscrollHi']
         ptime = previnfo['time']
 
-        # now
+        # current state
         xpos = info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']
         isDead = info['player_state'] != 8
         time = info['time']
 
-        # change
+        # change between the two states
         dpos = xpos - pxpos
         dtime = time - ptime
 
         return (-15 if isDead else 0) + dpos + 0.1 * dtime
 
     def replay(self):
-        """
-        TD learning for q values on past transitions.
-
-        Use:
-            self.target_model(state): predicted q values as an array with entry
-                per action
-        """
         if len(self.replay_memory) > 64:  # 64 is self.options.batch_size
             minibatch = random.sample(self.replay_memory, 64)
             minibatch = [
@@ -189,94 +162,56 @@ class DQN:
         self.replay_memory.append((state, action, reward, next_state, done))
 
     def train_episode(self):
-        """
-        Perform a single episode of the Q-Learning algorithm for off-policy TD
-        control using a DNN Function Approximation. Finds the optimal greedy policy
-        while following an epsilon-greedy policy.
-
-        Use:
-            self.epsilon_greedy(state): return probabilities of actions.
-            np.random.choice(array, p=prob): sample an element from 'array' based on their corresponding
-                probabilites 'prob'.
-            self.memorize(state, action, reward, next_state, done): store the transition in the replay buffer
-            self.update_target_model(): copy weights from model to target_model
-            self.replay(): TD learning for q values on past transitions
-            self.options.update_target_estimator_every: Copy parameters from the Q estimator to the
-                target estimator every N steps (HINT: to be done across episodes)
-        """
-
-        # Reset the environment
         state = self.env.reset()
         previnfo = None
 
         for _ in range(131072):  # Self.options.steps
-            # Get action
+            # If no movie is loaded, randomly select the next action
             if movie is None:
                 probabilities = self.epsilon_greedy(state)
                 chosen_action = np.random.choice(np.arange(len(probabilities)), p=probabilities)
-                next_state, reward, done, _ = env.step(chosen_action)
-                if previnfo is not None:
-                    print(self.myreward(info, previnfo))
-                    reward = self.myreward(info, previnfo)
-                else:
-                    reward = 0
-                sleep(0.01)
-                previnfo = info
+
+            # If a movie is loaded, step through the movie instead
             else:
-                env.initial_state = movie.get_state()
-                state = movie.get_state()
-                next_state, reward, done, info, chosen_action = None, None, None, None, None
-                while movie.step():
-                    chosen_action = []
-                    for p in range(movie.players):
-                        for i in range(env.num_buttons):
-                            chosen_action.append(movie.get_key(i, p))
-                    # Note: The action space is stored in the keys variable itself.
-                    # The keys is an array of 9 booleans, each mapping to an action (move right, jump, etc.)
-                    # True = Key is pressed and action is being used; False otherwise
-                    next_state, reward, done, info = env.step(chosen_action)
-                    env.render()
-                    # print(info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi'])
-                    if previnfo is not None:
-                        print(self.myreward(info, previnfo))
-                        reward = self.myreward(info, previnfo)
-                    else:
-                        reward = 0
-                    sleep(0.01)
-                    # Memorize and replay
-                    self.memorize(state, chosen_action, reward, next_state, done)
-                    self.replay()
-                    if done:
-                        break
-                    # Set state, update target model if needed, increment step count
-                    state = next_state
-                    if self.n_steps % 100 == 0:
-                        self.update_target_model()
-                    self.n_steps += 1
-                    previnfo = info
+                if not movie.step(): # Movie replay has ended
+                    break
+
+                # derive the actions from the pressed keys
+                chosen_action = []
+                for p in range(movie.players):
+                    for i in range(env.num_buttons):
+                        chosen_action.append(movie.get_key(i, p))
+
+            # step through the environment with the chosen action
+            next_state, reward, done, info = env.step(chosen_action)
+
+            # calculate reward using previous data for mario
+            if previnfo is not None:
+                print(self.myreward(info, previnfo))
+                reward = self.myreward(info, previnfo)
+            else:
+                reward = 0
+
+            # update replay memory & model
+            self.memorize(state, chosen_action, reward, next_state, done)
+            self.replay()
+            self.env.render()
+            if done:
+                break
+
+            # Update variables for next step
+            state = next_state
+            if self.n_steps % 100 == 0:
+                self.update_target_model()
+            self.n_steps += 1
+
+            previnfo = info
 
     def __str__(self):
         return "DQN"
 
-    def create_greedy_policy(self):
-        """
-        Creates a greedy policy based on Q values.
 
-
-        Returns:
-            A function that takes an observation as input and returns a greedy
-            action
-        """
-
-        def policy_fn(state):
-            state = torch.as_tensor(state, dtype=torch.float32)
-            q_values = self.model(state)
-            return torch.argmax(q_values).detach().numpy()
-
-        return policy_fn
-
-
-movie = retro.Movie('C:/Users/stjoh/Documents/CSCE 642/MarkGameplay.bk2')
+movie = retro.Movie('C:/Users/sturt/Desktop/replays/d.bk2')
 movie.step()
 
 env = retro.make(
