@@ -26,6 +26,7 @@ def convertAct(action):
         else:
             return 0
 
+
 def convertActBack(actionID):
     if actionID == 0:
         return [0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -43,7 +44,9 @@ def convertActBack(actionID):
         # print("Unknown actionID", actionID)
         return [0, 0, 0, 0, 0, 0, 0, 0, 0]
 
+
 N_ACTIONS = 6
+
 
 class CustomCNN(nn.Module):
     def __init__(self):
@@ -67,6 +70,7 @@ class CustomCNN(nn.Module):
         x = x.view(x.size(0), -1)
         return self.fc(x)
 
+
 class DQN:
     def __init__(self, env, movie):
         # Create CNN
@@ -80,8 +84,6 @@ class DQN:
         # Create target Q-network
         self.target_model = deepcopy(self.model)
 
-
-
         # Set up the optimizer
         self.optimizer = AdamW(
             self.model.parameters(), lr=.001, amsgrad=True
@@ -93,11 +95,12 @@ class DQN:
         for p in self.target_model.parameters():
             p.requires_grad = False
 
+        self.load_model('Current_mario.pth')
         self.model.to('cuda')
         self.target_model.to('cuda')
 
         # Replay buffer
-        self.replay_memory = deque(maxlen=300000) # Max replay size
+        self.replay_memory = deque(maxlen=300000)  # Max replay size
 
         # Number of training steps so far
         self.n_steps = 0
@@ -127,9 +130,18 @@ class DQN:
         self.target_model.load_state_dict(checkpoint['target_model_state_dict'])
         print(f"Model loaded from {path}")
 
+    def greedy(self, state):
+        state = np.transpose(state, (2, 0, 1))
+        state = np.array([state])
+        state = torch.as_tensor(state, dtype=torch.float32)
+        action_values = self.model(state)
+        return torch.argmax(action_values)
+
     def epsilon_greedy(self, state):
         nA = N_ACTIONS
-        state = torch.as_tensor(state)
+        state = np.transpose(state, (2, 0, 1))
+        state = np.array([state])
+        state = torch.as_tensor(state, dtype=torch.float32)
         action_values = self.model(state)
         greedy_action = torch.argmax(action_values)
         probability_per_action = np.ones(nA) * (0.90 / nA)  # .90 is greedy epsilon. Chance of random exploration
@@ -206,6 +218,16 @@ class DQN:
         next_state = np.transpose(next_state, (2, 0, 1))
         self.replay_memory.append((state, action, reward, next_state, done))
 
+    def getitdone(self):
+        state = self.env.reset()
+        for _ in range(131072):
+            act = self.greedy(state)
+            print(act)
+            act_keys = convertActBack(act)
+            next_state, _, _, _ = self.env.step(act_keys)
+            state = next_state
+            self.env.render()
+
     def train_episode(self):
         state = self.env.reset()
         previnfo = None
@@ -219,7 +241,7 @@ class DQN:
 
             # If a movie is loaded, step through the movie instead
             else:
-                if not movie.step(): # Movie replay has ended
+                if not movie.step():  # Movie replay has ended
                     break
 
                 # derive the actions from the pressed keys
@@ -230,7 +252,7 @@ class DQN:
                 chosen_action_id = convertAct(chosen_action)
 
             # step through the environment with the chosen action
-            next_state, reward, done, info = env.step(chosen_action)
+            next_state, reward, done, info = self.env.step(chosen_action)
 
             # calculate reward using previous data for mario
             if previnfo is not None:
@@ -238,6 +260,9 @@ class DQN:
                 reward = self.myreward(info, previnfo)
             else:
                 reward = 0
+
+            if reward < -10:
+                done |= True
 
             # update replay memory & model
             self.memorize(state, chosen_action_id, reward, next_state, done)
@@ -251,16 +276,19 @@ class DQN:
             self.n_steps += 1
             if self.n_steps % 1000 == 0:
                 self.update_target_model()
-                self.save_model("Current_mario.pth")
 
             previnfo = info
+
+        # self.save_model("Current_mario.pth")
 
     def __str__(self):
         return "DQN"
 
+
 if torch.cuda.is_available():
-     torch.set_default_tensor_type(torch.cuda.FloatTensor)
-movie = retro.Movie(os.path.join(os.path.dirname(os.getcwd()), 'd.bk2'))
+    torch.set_default_tensor_type(torch.cuda.FloatTensor)
+
+movie = retro.Movie('C:/Users/stjoh/Documents/CSCE 642/d.bk2')
 movie.step()
 
 env = retro.make(
@@ -271,4 +299,4 @@ env = retro.make(
     players=movie.players,
 )
 dqn = DQN(env, movie)
-dqn.train_episode()
+dqn.getitdone()  # self.train_episode() to get the training side working
