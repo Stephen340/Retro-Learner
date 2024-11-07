@@ -121,6 +121,12 @@ class DQN:
         self.target_model.load_state_dict(checkpoint['target_model_state_dict'])
         print(f"Model loaded from {path}")
 
+    def greedy(self, state):
+        state = np.transpose(state, (2, 0, 1))
+        action_values = self.model(state)
+        greedy_action = torch.argmax(action_values)
+        return greedy_action
+
     def epsilon_greedy(self, state):
         nA = N_ACTIONS
         state = torch.as_tensor(state)
@@ -248,6 +254,19 @@ class DQN:
 
             previnfo = info
 
+    def playitup(self):
+        state = self.env.reset()
+
+        for _ in range(131072):  # Self.options.steps
+            chosen_action_id = self.greedy(state)
+            chosen_action = convertActBack(chosen_action_id)
+            next_state, _, done, _ = env.step(chosen_action)
+
+            if done:
+                break
+
+            state = next_state
+
     def __str__(self):
         return "DQN"
 
@@ -263,4 +282,4 @@ env = retro.make(
     players=movie.players,
 )
 dqn = DQN(env, movie)
-dqn.train_episode()
+dqn.playitup()
