@@ -1,3 +1,4 @@
+import os
 import random
 from copy import deepcopy
 from collections import deque
@@ -39,7 +40,7 @@ def convertActBack(actionID):
     elif actionID == 5:
         return [0, 0, 0, 0, 0, 0, 1, 0, 1]
     else:
-        print("Unknown actionID", actionID)
+        # print("Unknown actionID", actionID)
         return [0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 N_ACTIONS = 6
@@ -226,7 +227,7 @@ class DQN:
 
             # calculate reward using previous data for mario
             if previnfo is not None:
-                print(self.myreward(info, previnfo))
+                # print(self.myreward(info, previnfo))
                 reward = self.myreward(info, previnfo)
             else:
                 reward = 0
@@ -250,7 +251,7 @@ class DQN:
         return "DQN"
 
 
-movie = retro.Movie('C:/Users/sturt/Desktop/replays/d.bk2')
+movie = retro.Movie(os.path.join(os.path.dirname(os.getcwd()), 'd.bk2'))
 movie.step()
 
 env = retro.make(
