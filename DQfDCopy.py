@@ -107,6 +107,9 @@ class DQN:
 
         # Number of training steps so far
         self.n_steps = 0
+        self.epsilon = 1.0  # Start with full exploration
+        self.epsilon_min = 0.1  # Minimum exploration
+        self.epsilon_decay = 0.995  # Decay rate
 
     def update_target_model(self):
         # Copy weights from model to target_model
@@ -135,25 +138,29 @@ class DQN:
 
     def greedy(self, state):
         grayscale_transform = transforms.Grayscale()
-        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).cpu().numpy()
-        state = np.array([state])
-        state = torch.as_tensor(state, dtype=torch.float32).to('cuda')
+        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).unsqueeze(0).float().to('cuda')
         action_values = self.model(state)
-        return torch.argmax(action_values)
+        return torch.argmax(action_values).item()
 
     def epsilon_greedy(self, state):
         nA = N_ACTIONS
         grayscale_transform = transforms.Grayscale()
-        state = grayscale_transform(state)
-        state = np.transpose(state, (2, 0, 1))
-        state = np.array([state])
-        state = torch.as_tensor(state, dtype=torch.float32).to('cuda')
+        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).unsqueeze(0).float().to('cuda')
         action_values = self.model(state)
-        greedy_action = torch.argmax(action_values)
-        probability_per_action = np.ones(nA) * (0.90 / nA)  # .90 is greedy epsilon. Chance of random exploration
-        # Update the greedy action appropriately
-        probability_per_action[greedy_action] = 1.0 - .90 + .90 / nA
-        return probability_per_action
+
+        # Exploration vs. Exploitation choice
+        if random.random() < self.epsilon:  # 0.90 is self.epsilon
+            # Choose a random action
+            chosen_action = np.random.choice(np.arange(nA))
+        else:
+            # Choose the best action based on model predictions
+            chosen_action = torch.argmax(action_values).item()
+
+        return chosen_action
+
+    def decay_epsilon(self):
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
 
     def compute_target_values(self, next_states, rewards, dones):
         next_q_vals = self.target_model(next_states)  # Shape should be (64 * 4, num_actions)
@@ -248,15 +255,46 @@ class DQN:
         if len(self.sequence_buffer) == self.chunk_size:
             self.replay_memory.append(list(self.sequence_buffer))
 
-    def getitdone(self):
+    def train_episode_finetuning(self):
         state = self.env.reset()
-        for _ in range(131072):
-            act = self.greedy(state)
-            # print(act)
-            act_keys = convertActBack(act)
-            next_state, _, _, _ = self.env.step(act_keys)
-            state = next_state
+        previnfo = None
+        max_loc = -10
+
+        for _ in range(131072):  # Self.options.steps
+            # Choose action with exploration
+            chosen_action_id = self.epsilon_greedy(state)
+            chosen_action = convertActBack(chosen_action_id)
+
+            next_state, reward, done, info = self.env.step(chosen_action)
+            if previnfo is not None:
+                reward = self.myreward(info, previnfo, max_loc)
+            else:
+                reward = 0
+
+            if reward < -10:
+                done |= True
+
+            if (info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']) > max_loc:
+                max_loc = info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']
+
+            # Store in replay buffer and learn from experience
+            self.memorize(state, chosen_action_id, reward, next_state, done)
+            self.replay()
             self.env.render()
+
+            if done:
+                break
+
+            state = next_state
+            self.n_steps += 1
+            if self.n_steps % 1000 == 0:
+                self.update_target_model()
+
+            previnfo = info
+
+        # Decay epsilon after each episode
+        self.decay_epsilon()
+        self.save_model("Current_mario.pth")
 
     def train_episode(self):
         state = self.env.reset()
@@ -356,7 +394,7 @@ for i in range(50):
         players=movie.players,
     )
     dqn = DQN(env, movie)
-    dqn.train_episode()  # self.train_episode() to get the training side working
+    dqn.train_episode_finetuning()  # self.train_episode() to get the training side working
     movie.close()
     env.close()
     del env
