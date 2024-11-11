@@ -1,12 +1,14 @@
 import os
 import random
-from copy import deepcopy
+import time
 from collections import deque
+from copy import deepcopy
+
+import numpy as np
 import retro
 import torch
 import torch.nn as nn
-import numpy as np
-from time import sleep
+from torchvision import transforms
 from torch.optim import AdamW
 
 
@@ -52,23 +54,21 @@ class CustomCNN(nn.Module):
     def __init__(self):
         super(CustomCNN, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=8, stride=4),
+            nn.Conv2d(in_channels=1, out_channels=32, kernel_size=8, stride=4),  # Now in_channels=1
             nn.ReLU(),
             nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2),
             nn.ReLU(),
             nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
-            nn.ReLU()
-        )
-        self.fc = nn.Sequential(
-            nn.Linear(26 * 24 * 64, 512),
             nn.ReLU(),
-            nn.Linear(512, N_ACTIONS)
+            nn.Flatten(),
+            nn.Linear(39936, 512),
+            nn.ReLU(),
+            nn.Linear(512, N_ACTIONS),
         )
 
     def forward(self, x):
         x = self.conv(x)
-        x = x.view(x.size(0), -1)
-        return self.fc(x)
+        return x
 
 
 class DQN:
@@ -77,6 +77,8 @@ class DQN:
         self.movie = movie
         self.env = env
         self.model = CustomCNN()  # Action space
+        self.chunk_size = 4
+        self.sequence_buffer = deque(maxlen=4)  # Temporary buffer to store chunks
 
         self.movie.step()
         self.env.initial_state = self.movie.get_state()
@@ -95,7 +97,8 @@ class DQN:
         for p in self.target_model.parameters():
             p.requires_grad = False
 
-        self.load_model('Current_mario.pth')
+        if os.path.exists('Current_mario.pth'):
+            self.load_model('Current_mario.pth')
         self.model.to('cuda')
         self.target_model.to('cuda')
 
@@ -131,17 +134,20 @@ class DQN:
         print(f"Model loaded from {path}")
 
     def greedy(self, state):
-        state = np.transpose(state, (2, 0, 1))
+        grayscale_transform = transforms.Grayscale()
+        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).cpu().numpy()
         state = np.array([state])
-        state = torch.as_tensor(state, dtype=torch.float32)
+        state = torch.as_tensor(state, dtype=torch.float32).to('cuda')
         action_values = self.model(state)
         return torch.argmax(action_values)
 
     def epsilon_greedy(self, state):
         nA = N_ACTIONS
+        grayscale_transform = transforms.Grayscale()
+        state = grayscale_transform(state)
         state = np.transpose(state, (2, 0, 1))
         state = np.array([state])
-        state = torch.as_tensor(state, dtype=torch.float32)
+        state = torch.as_tensor(state, dtype=torch.float32).to('cuda')
         action_values = self.model(state)
         greedy_action = torch.argmax(action_values)
         probability_per_action = np.ones(nA) * (0.90 / nA)  # .90 is greedy epsilon. Chance of random exploration
@@ -150,59 +156,75 @@ class DQN:
         return probability_per_action
 
     def compute_target_values(self, next_states, rewards, dones):
-        next_q_vals = self.target_model(next_states)
-        best_next_q_vals = torch.max(next_q_vals, dim=1)[0]  # Get max qs for each state
-        target = rewards + 0.9 * best_next_q_vals * (1 - dones)  # self.options.gamma is 0.9
-        return torch.as_tensor(target)
+        next_q_vals = self.target_model(next_states)  # Shape should be (64 * 4, num_actions)
+        best_next_q_vals = torch.max(next_q_vals, dim=1)[0]  # Shape should be (64 * 4)
+        best_next_q_vals = best_next_q_vals.view(16, 4)  # Shape (64, 4)
+        target = rewards + 0.9 * best_next_q_vals * (1 - dones)  # 0.9 is gamma
 
-    def myreward(self, info, previnfo):
+        return target
+
+    def myreward(self, info, previnfo, max_loc):
         # previous state
         pxpos = previnfo['x_position2'] + previnfo['xscrollLo'] + 256 * previnfo['xscrollHi']
         ptime = previnfo['time']
 
         # current state
         xpos = info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']
-        isDead = info['player_state'] != 8
+        # print(xpos)
+        isDead = info['player_state'] == 6 or info['player_state'] == 11
         time = info['time']
 
         # change between the two states
         dpos = xpos - pxpos
         dtime = time - ptime
 
-        return (-15 if isDead else 0) + dpos + 0.1 * dtime
+        return (-40 if isDead else 0) + dpos + 0.1 * dtime - (5 if dpos < 0 else 0) + (5 if max_loc < xpos else 0)
 
     def replay(self):
-        if len(self.replay_memory) > 64:  # 64 is self.options.batch_size
-            minibatch = random.sample(self.replay_memory, 64)
-            minibatch = [
-                np.array(
-                    [
-                        transition[idx]
-                        for transition, idx in zip(minibatch, [i] * len(minibatch))
-                    ]
-                )
-                for i in range(5)
-            ]
-            states, actions, rewards, next_states, dones = minibatch
-            # Convert numpy arrays to torch tensors
-            states = torch.as_tensor(states, dtype=torch.float32)
-            actions = torch.as_tensor(actions, dtype=torch.float32)
-            rewards = torch.as_tensor(rewards, dtype=torch.float32)
-            next_states = torch.as_tensor(next_states, dtype=torch.float32)
-            dones = torch.as_tensor(dones, dtype=torch.float32)
+        if len(self.replay_memory) > 16:  # 64 is self.options.batch_size
+            minibatch = random.sample(self.replay_memory, 16)
+            states, actions, rewards, next_states, dones = [], [], [], [], []
+
+            for chunk in minibatch:
+                # Accumulate frames in the chunk for each transition element
+                chunk_states, chunk_actions, chunk_rewards, chunk_next_states, chunk_dones = zip(*chunk)
+                states.append(np.array(chunk_states))
+                actions.append(np.array(chunk_actions))
+                rewards.append(np.array(chunk_rewards))
+                next_states.append(np.array(chunk_next_states))
+                dones.append(np.array(chunk_dones))
 
             # Current Q-values
-            if states.shape[1] != 3:
-                states = np.transpose(states, (0, 3, 1, 2))
+            states = np.array(states)  # Shape should be (batch_size, chunk_size, H, W, C)
 
+            # Transpose to (batch_size, chunk_size, C, H, W) if necessary
+            if states.shape[-1] == 1:  # Checking if the last dimension is the channel (C)
+                states = states.transpose((0, 1, 4, 2, 3))
+
+            # Convert numpy arrays to torch tensors
+            states = torch.as_tensor(np.array(states), dtype=torch.float32).to('cuda')
+            actions = torch.as_tensor(np.array(actions), dtype=torch.long).to('cuda')  # Using long for indexing
+            rewards = torch.as_tensor(np.array(rewards), dtype=torch.float32).to('cuda')
+            next_states = torch.as_tensor(np.array(next_states), dtype=torch.float32).to('cuda')
+            dones = torch.as_tensor(np.array(dones), dtype=torch.float32).to('cuda')
+
+            # Reshape to flatten batch and chunk for model input
+            states = states.view(-1, 1, 224, 240)
+            next_states = next_states.view(-1, 1, 224, 240)
+
+            # Calculate current Q-values
             current_q = self.model(states)
-            # Q-values for actions in the replay memory
-            current_q = torch.gather(
-                current_q, dim=1, index=actions.unsqueeze(1).long()
-            ).squeeze(-1)
+            current_q = current_q.view(16, 4, -1)  # Reshape back to (batch_size, chunk_size, num_actions)
+
+            # Gather Q-values for actions taken in replay memory
+            actions = actions.unsqueeze(-1)  # Shape (64, 4, 1) to match current_q for gather
+            current_q = torch.gather(current_q, dim=2, index=actions).squeeze(-1)  # Shape (64, 4)
 
             with torch.no_grad():
+                # Compute target Q-values
+                next_states = next_states.view(-1, 1, 224, 240)
                 target_q = self.compute_target_values(next_states, rewards, dones)
+                target_q = target_q.view(16, 4)
 
             # Calculate loss
             loss_q = self.loss_fn(current_q, target_q)
@@ -214,15 +236,23 @@ class DQN:
             self.optimizer.step()
 
     def memorize(self, state, action, reward, next_state, done):
-        state = np.transpose(state, (2, 0, 1))
-        next_state = np.transpose(next_state, (2, 0, 1))
-        self.replay_memory.append((state, action, reward, next_state, done))
+        # print(state.shape)
+        grayscale_transform = transforms.Grayscale()
+        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).cpu().numpy()  # (224, 240)
+        next_state = grayscale_transform(torch.tensor(next_state).permute(2, 0, 1)).cpu().numpy()  # (224, 240)
+        state = np.expand_dims(state, axis=0)  # Now (1, 224, 240)
+        next_state = np.expand_dims(next_state, axis=0)  # Now (1, 224, 240)
+
+        # Save the grayscale states in the buffer
+        self.sequence_buffer.append((state, action, reward, next_state, done))
+        if len(self.sequence_buffer) == self.chunk_size:
+            self.replay_memory.append(list(self.sequence_buffer))
 
     def getitdone(self):
         state = self.env.reset()
         for _ in range(131072):
             act = self.greedy(state)
-            print(act)
+            # print(act)
             act_keys = convertActBack(act)
             next_state, _, _, _ = self.env.step(act_keys)
             state = next_state
@@ -231,6 +261,7 @@ class DQN:
     def train_episode(self):
         state = self.env.reset()
         previnfo = None
+        max_loc = -10
 
         for _ in range(131072):  # Self.options.steps
             # If no movie is loaded, randomly select the next action
@@ -253,16 +284,18 @@ class DQN:
 
             # step through the environment with the chosen action
             next_state, reward, done, info = self.env.step(chosen_action)
-
             # calculate reward using previous data for mario
             if previnfo is not None:
-                # print(self.myreward(info, previnfo))
-                reward = self.myreward(info, previnfo)
+                # print(self.myreward(info, previnfo, max_loc))
+                reward = self.myreward(info, previnfo, max_loc)
             else:
                 reward = 0
 
             if reward < -10:
                 done |= True
+
+            if (info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']) > max_loc:
+                max_loc = info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']
 
             # update replay memory & model
             self.memorize(state, chosen_action_id, reward, next_state, done)
@@ -279,7 +312,7 @@ class DQN:
 
             previnfo = info
 
-        # self.save_model("Current_mario.pth")
+        self.save_model("Current_mario.pth")
 
     def __str__(self):
         return "DQN"
@@ -288,15 +321,43 @@ class DQN:
 if torch.cuda.is_available():
     torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
-movie = retro.Movie('C:/Users/stjoh/Documents/CSCE 642/d.bk2')
-movie.step()
+for i in range(50):
+    if i % 7 == 0:
+        a = 'a.bk2'
+        print('a')
+    if i % 7 == 1:
+        a = 'b.bk2'
+        print('b')
+    if i % 7 == 2:
+        a = 'c.bk2'
+        print('c')
+    if i % 7 == 3:
+        a = 'd.bk2'
+        print('d')
+    if i % 7 == 4:
+        a = '1.bk2'
+        print('1')
+    if i % 7 == 5:
+        a = '2.bk2'
+        print('2')
+    if i % 7 == 6:
+        a = '3.bk2'
+        print('3')
 
-env = retro.make(
-    game=movie.get_game(),
-    state=None,
-    # bk2s can contain any button presses, so allow everything
-    use_restricted_actions=retro.Actions.ALL,
-    players=movie.players,
-)
-dqn = DQN(env, movie)
-dqn.getitdone()  # self.train_episode() to get the training side working
+    path = 'C:/Users/stjoh/Documents/CSCE 642/' + a
+    movie = retro.Movie(path)
+    movie.step()
+
+    env = retro.make(
+        game=movie.get_game(),
+        state=None,
+        # bk2s can contain any button presses, so allow everything
+        use_restricted_actions=retro.Actions.ALL,
+        players=movie.players,
+    )
+    dqn = DQN(env, movie)
+    dqn.train_episode()  # self.train_episode() to get the training side working
+    movie.close()
+    env.close()
+    del env
+    del movie
