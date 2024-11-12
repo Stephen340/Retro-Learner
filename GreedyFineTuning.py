@@ -118,6 +118,14 @@ class DQN:
         self.epsilon_decay = 0.995  # Decay rate
         self.leftward_counter = 0  # Each frame with left movement
 
+    def handle_episodes(self):
+        for i in range(5000):
+            print(i)
+            dqn.train_episode_finetuning(i)
+            if i % 10 == 9:
+                dqn.save_model('mario_rightward.pth')
+            env.reset()
+
     def update_target_model(self):
         # Copy weights from model to target_model
         self.target_model.load_state_dict(self.model.state_dict())
@@ -167,6 +175,7 @@ class DQN:
 
     def decay_epsilon(self):
         if self.epsilon > self.epsilon_min:
+            print(self.epsilon * self.epsilon_decay)
             self.epsilon *= self.epsilon_decay
 
     def compute_target_values(self, next_states, rewards, dones):
@@ -373,27 +382,15 @@ if torch.cuda.is_available():
     torch.set_default_device('cuda')
 
 files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3', 'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
-
-for i in range(5000):
-    i = i % 27
-
-    print(i)
-    path = 'C:/Users/stjoh/Documents/CSCE 642/' + files[i] + '.bk2'
-    movie = retro.Movie(path)
-    movie.step()
-
-    env = retro.make(
+path = 'C:/Users/stjoh/Documents/CSCE 642/' + 'a' + '.bk2'
+movie = retro.Movie(path)
+env = retro.make(
         game=movie.get_game(),
         state=None,
         # bk2s can contain any button presses, so allow everything
         use_restricted_actions=retro.Actions.ALL,
         players=movie.players,
     )
-    dqn = DQN(env, movie)
-    dqn.train_episode_finetuning(i)  # self.train_episode() to get the training side working
-    env.render(close=True)
-    movie.close()
-    env.close()
-    del env
-    del movie
-    gc.collect()
+dqn = DQN(env, movie)
+dqn.load_model('mario_rightward.pth')
+dqn.handle_episodes()
