@@ -1,7 +1,6 @@
 import gc
 import os
 import random
-import time
 from collections import deque
 from copy import deepcopy
 
@@ -143,32 +142,6 @@ class DQN:
         self.target_model.load_state_dict(checkpoint['target_model_state_dict'])
         print(f"Model loaded from {path}")
 
-    def greedy(self, state):
-        grayscale_transform = transforms.Grayscale()
-        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).unsqueeze(0).float()
-        action_values = self.model(state)
-        return torch.argmax(action_values).item()
-
-    def epsilon_greedy(self, state):
-        nA = N_ACTIONS
-        grayscale_transform = transforms.Grayscale()
-        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).unsqueeze(0).float()
-        action_values = self.model(state)
-
-        # Exploration vs. Exploitation choice
-        if random.random() < self.epsilon:  # 0.80 is self.epsilon
-            # Choose a random action
-            chosen_action = np.random.choice(np.arange(nA))
-        else:
-            # Choose the best action based on model predictions
-            chosen_action = torch.argmax(action_values).item()
-
-        return chosen_action
-
-    def decay_epsilon(self):
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-
     def compute_target_values(self, next_states, rewards, dones):
         next_q_vals = self.target_model(next_states)  # Shape should be (64 * 4, num_actions)
         best_next_q_vals = torch.max(next_q_vals, dim=1)[0]  # Shape should be (64 * 4)
@@ -270,71 +243,21 @@ class DQN:
         if len(self.sequence_buffer) == self.chunk_size:
             self.replay_memory.append(list(self.sequence_buffer))
 
-    def train_episode_finetuning(self, save_index):
-        state = self.env.reset()
-        previnfo = None
-        max_loc = -10
-
-        for _ in range(131072):  # Self.options.steps
-            # Choose action with exploration
-            chosen_action_id = self.epsilon_greedy(state)
-            chosen_action = convertActBack(chosen_action_id)
-
-            next_state, reward, done, info = self.env.step(chosen_action)
-            if previnfo is not None:
-                reward = self.myreward(info, previnfo)
-            else:
-                reward = 0
-
-            if reward == -100:
-                done |= True
-
-            if (info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']) > max_loc:
-                max_loc = info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']
-
-            # Store in replay buffer and learn from experience
-            self.memorize(state, chosen_action_id, reward, next_state, done)
-            self.replay()
-            self.env.render()
-
-            if done:
-                self.update_target_model()
-                break
-
-            state = next_state
-            self.n_steps += 1
-            if self.n_steps % 1000 == 0:
-                self.update_target_model()
-
-            previnfo = info
-
-        # Decay epsilon after each episode
-        self.decay_epsilon()
-        self.save_model("mario_new_data.pth")
-
     def train_episode(self):
         state = self.env.reset()
         previnfo = None
-        max_loc = -10
 
         for _ in range(131072):  # Self.options.steps
-            # If no movie is loaded, randomly select the next action
-            if movie is None:
-                probabilities = self.epsilon_greedy(state)
-                chosen_action_id = np.random.choice(np.arange(len(probabilities)), p=probabilities)
-                chosen_action = convertActBack(chosen_action_id)
-
             # If a movie is loaded, step through the movie instead
-            else:
-                if not movie.step():  # Movie replay has ended
-                    break
+            if not movie.step():  # Movie replay has ended
+                break
 
-                # derive the actions from the pressed keys
-                chosen_action = []
-                for p in range(movie.players):
-                    for i in range(env.num_buttons):
-                        chosen_action.append(movie.get_key(i, p))
-                chosen_action_id = convertAct(chosen_action)
+            # derive the actions from the pressed keys
+            chosen_action = []
+            for p in range(movie.players):
+                for i in range(env.num_buttons):
+                    chosen_action.append(movie.get_key(i, p))
+            chosen_action_id = convertAct(chosen_action)
 
             # step through the environment with the chosen action
             next_state, reward, done, info = self.env.step(chosen_action)

@@ -321,59 +321,6 @@ class DQN:
         self.decay_epsilon()
         self.save_model("mario_new_data.pth")
 
-    def train_episode(self):
-        state = self.env.reset()
-        previnfo = None
-        max_loc = -10
-
-        for _ in range(131072):  # Self.options.steps
-            # If no movie is loaded, randomly select the next action
-            if movie is None:
-                probabilities = self.epsilon_greedy(state)
-                chosen_action_id = np.random.choice(np.arange(len(probabilities)), p=probabilities)
-                chosen_action = convertActBack(chosen_action_id)
-
-            # If a movie is loaded, step through the movie instead
-            else:
-                if not movie.step():  # Movie replay has ended
-                    break
-
-                # derive the actions from the pressed keys
-                chosen_action = []
-                for p in range(movie.players):
-                    for i in range(env.num_buttons):
-                        chosen_action.append(movie.get_key(i, p))
-                chosen_action_id = convertAct(chosen_action)
-
-            # step through the environment with the chosen action
-            next_state, reward, done, info = self.env.step(chosen_action)
-            # calculate reward using previous data for mario
-            if previnfo is not None:
-                # print(self.myreward(info, previnfo, max_loc))
-                reward = self.myreward(info, previnfo)
-            else:
-                reward = 0
-
-            if reward < -10:
-                done |= True
-
-            # update replay memory & model
-            self.memorize(state, chosen_action_id, reward, next_state, done)
-            self.replay()
-            # self.env.render()
-            if done:
-                break
-
-            # Update variables for next step
-            state = next_state
-            self.n_steps += 1
-            if self.n_steps % 3000 == 0:
-                self.update_target_model()
-
-            previnfo = info
-
-        self.save_model("mario_rightward.pth")
-
     def __str__(self):
         return "DQN"
 
