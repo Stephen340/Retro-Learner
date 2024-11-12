@@ -111,7 +111,7 @@ class DQN:
 
         # Number of training steps so far
         self.n_steps = 0
-        self.epsilon = 0.8  # Start with full exploration
+        self.epsilon = 0.5  # Start with full exploration
         self.epsilon_min = 0.05  # Minimum exploration
         self.epsilon_decay = 0.995  # Decay rate
         self.leftward_counter = 0  # Each frame with left movement
@@ -120,8 +120,7 @@ class DQN:
         for i in range(5000):
             print(i)
             dqn.train_episode_finetuning(i)
-            if i % 10 == 9:
-                dqn.save_model('mario_rightward.pth')
+            dqn.save_model('mario_rightward.pth')
             env.reset()
 
     def update_target_model(self):
@@ -153,6 +152,7 @@ class DQN:
         grayscale_transform = transforms.Grayscale()
         state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).unsqueeze(0).float()
         action_values = self.model(state)
+        print(action_values)
         return torch.argmax(action_values).item()
 
     def epsilon_greedy(self, state):
@@ -179,7 +179,7 @@ class DQN:
     def compute_target_values(self, next_states, rewards, dones):
         next_q_vals = self.target_model(next_states)  # Shape should be (64 * 4, num_actions)
         best_next_q_vals = torch.max(next_q_vals, dim=1)[0]  # Shape should be (64 * 4)
-        best_next_q_vals = best_next_q_vals.view(8, 4)  # Shape (64, 4)
+        best_next_q_vals = best_next_q_vals.view(16, 4)  # Shape (64, 4)
         target = rewards + 0.9 * best_next_q_vals * (1 - dones)  # 0.9 is gamma
 
         return target
@@ -210,8 +210,8 @@ class DQN:
         return reward
 
     def replay(self):
-        if len(self.replay_memory) > 8:  # 64 is self.options.batch_size
-            minibatch = random.sample(self.replay_memory, 8)
+        if len(self.replay_memory) > 16:  # 64 is self.options.batch_size
+            minibatch = random.sample(self.replay_memory, 16)
             states, actions, rewards, next_states, dones = [], [], [], [], []
 
             for chunk in minibatch:
@@ -243,7 +243,7 @@ class DQN:
 
             # Calculate current Q-values
             current_q = self.model(states)
-            current_q = current_q.view(8, 4, -1)  # Reshape back to (batch_size, chunk_size, num_actions)
+            current_q = current_q.view(16, 4, -1)  # Reshape back to (batch_size, chunk_size, num_actions)
 
             # Gather Q-values for actions taken in replay memory
             actions = actions.unsqueeze(-1)  # Shape (64, 4, 1) to match current_q for gather
@@ -253,7 +253,7 @@ class DQN:
                 # Compute target Q-values
                 next_states = next_states.view(-1, 1, 224, 240)
                 target_q = self.compute_target_values(next_states, rewards, dones)
-                target_q = target_q.view(8, 4)
+                target_q = target_q.view(16, 4)
 
             # Calculate loss
             loss_q = self.loss_fn(current_q, target_q)

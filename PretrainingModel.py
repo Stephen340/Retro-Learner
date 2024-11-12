@@ -9,7 +9,37 @@ import retro
 import torch
 import torch.nn as nn
 from torchvision import transforms
+from torchvision import transforms as T
 from torch.optim import AdamW
+from gym import ObservationWrapper
+from gym.spaces import Box
+from PIL import Image
+
+
+class ResizeObservation(ObservationWrapper):
+    def __init__(self, env, shape):
+        super().__init__(env)
+        if isinstance(shape, int):
+            self.shape = (shape, shape)
+        else:
+            self.shape = tuple(shape)
+
+        obs_shape = self.shape + self.observation_space.shape[2:]
+        self.observation_space = Box(low=0, high=255, shape=obs_shape, dtype=np.uint8)
+
+    def observation(self, observation):
+        # Convert numpy array to PIL image
+        observation = Image.fromarray(observation)
+
+        # Apply transformations: resize to specified shape and grayscale, then normalize and convert to tensor
+        transform = T.Compose([
+            T.Resize(self.shape),
+            T.Grayscale(),
+            T.ToTensor(),  # Converts to [0, 1] tensor
+            T.Lambda(lambda x: x * 255)  # Rescale back to [0, 255] range as a tensor
+        ])
+        observation = transform(observation)
+        return observation
 
 
 def convertAct(action):
@@ -54,19 +84,14 @@ class CustomCNN(nn.Module):
     def __init__(self):
         super(CustomCNN, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=64, kernel_size=8, stride=4),
+            nn.Conv2d(in_channels=1, out_channels=32, kernel_size=8, stride=4),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2),
             nn.ReLU(),
-            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(256 * 8 * 9, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 512),
+            nn.Linear(3136, 512),
             nn.ReLU(),
             nn.Linear(512, N_ACTIONS),
         )
@@ -102,8 +127,8 @@ class DQN:
         for p in self.target_model.parameters():
             p.requires_grad = False
 
-        if os.path.exists('mario_new_data.pth'):
-            self.load_model('mario_new_data.pth')
+        if os.path.exists('mario_downsized.pth'):
+            self.load_model('mario_downsized.pth')
         self.model.to('cuda')
         self.target_model.to('cuda')
 
@@ -145,7 +170,7 @@ class DQN:
     def compute_target_values(self, next_states, rewards, dones):
         next_q_vals = self.target_model(next_states)  # Shape should be (64 * 4, num_actions)
         best_next_q_vals = torch.max(next_q_vals, dim=1)[0]  # Shape should be (64 * 4)
-        best_next_q_vals = best_next_q_vals.view(8, 4)  # Shape (64, 4)
+        best_next_q_vals = best_next_q_vals.view(16, 4)  # Shape (64, 4)
         target = rewards + 0.9 * best_next_q_vals * (1 - dones)  # 0.9 is gamma
 
         return target
@@ -176,8 +201,8 @@ class DQN:
         return reward
 
     def replay(self):
-        if len(self.replay_memory) > 8:  # 64 is self.options.batch_size
-            minibatch = random.sample(self.replay_memory, 8)
+        if len(self.replay_memory) > 16:  # 64 is self.options.batch_size
+            minibatch = random.sample(self.replay_memory, 16)
             states, actions, rewards, next_states, dones = [], [], [], [], []
 
             for chunk in minibatch:
@@ -204,12 +229,12 @@ class DQN:
             dones = torch.as_tensor(np.array(dones), dtype=torch.float32).to('cuda')
 
             # Reshape to flatten batch and chunk for model input
-            states = states.view(-1, 1, 224, 240)
-            next_states = next_states.view(-1, 1, 224, 240)
+            states = states.view(-1, 1, 84, 84)
+            next_states = next_states.view(-1, 1, 84, 84)
 
             # Calculate current Q-values
             current_q = self.model(states)
-            current_q = current_q.view(8, 4, -1)  # Reshape back to (batch_size, chunk_size, num_actions)
+            current_q = current_q.view(16, 4, -1)  # Reshape back to (batch_size, chunk_size, num_actions)
 
             # Gather Q-values for actions taken in replay memory
             actions = actions.unsqueeze(-1)  # Shape (64, 4, 1) to match current_q for gather
@@ -217,9 +242,9 @@ class DQN:
 
             with torch.no_grad():
                 # Compute target Q-values
-                next_states = next_states.view(-1, 1, 224, 240)
+                next_states = next_states.view(-1, 1, 84, 84)
                 target_q = self.compute_target_values(next_states, rewards, dones)
-                target_q = target_q.view(8, 4)
+                target_q = target_q.view(16, 4)
 
             # Calculate loss
             loss_q = self.loss_fn(current_q, target_q)
@@ -231,14 +256,15 @@ class DQN:
             self.optimizer.step()
 
     def memorize(self, state, action, reward, next_state, done):
-        # print(state.shape)
-        grayscale_transform = transforms.Grayscale()
-        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).cpu().numpy()  # (224, 240)
-        next_state = grayscale_transform(torch.tensor(next_state).permute(2, 0, 1)).cpu().numpy()  # (224, 240)
-        state = np.expand_dims(state, axis=0)  # Now (1, 224, 240)
-        next_state = np.expand_dims(next_state, axis=0)  # Now (1, 224, 240)
+        # Ensure state and next_state are in tensor format and on CPU as numpy arrays
+        state = torch.tensor(state).cpu().numpy()  # (1, 84, 84)
+        next_state = torch.tensor(next_state).cpu().numpy()  # (1, 84, 84)
 
-        # Save the grayscale states in the buffer
+        # Add the grayscale channel dimension if needed
+        state = np.expand_dims(state, axis=0)  # (1, 1, 84, 84)
+        next_state = np.expand_dims(next_state, axis=0)  # (1, 1, 84, 84)
+
+        # Save the states in the replay buffer
         self.sequence_buffer.append((state, action, reward, next_state, done))
         if len(self.sequence_buffer) == self.chunk_size:
             self.replay_memory.append(list(self.sequence_buffer))
@@ -274,7 +300,7 @@ class DQN:
             # update replay memory & model
             self.memorize(state, chosen_action_id, reward, next_state, done)
             self.replay()
-            # self.env.render()
+            self.env.render()
             if done:
                 break
 
@@ -286,7 +312,7 @@ class DQN:
 
             previnfo = info
 
-        self.save_model("mario_rightward.pth")
+        self.save_model("mario_downsized.pth")
 
     def __str__(self):
         return "DQN"
@@ -298,22 +324,32 @@ if torch.cuda.is_available():
 files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3', 'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
 
 for i in range(5000):
-    i = i % 27
-
     print(i)
+    i = i % 27
     path = 'C:/Users/stjoh/Documents/CSCE 642/' + files[i] + '.bk2'
     movie = retro.Movie(path)
-    movie.step()
+    movie.step()  # Ensure the movie is stepped to initialize its state properly
 
+    # Set up the environment using the movie's initial state
     env = retro.make(
         game=movie.get_game(),
         state=None,
-        # bk2s can contain any button presses, so allow everything
         use_restricted_actions=retro.Actions.ALL,
         players=movie.players,
     )
+
+    # Load the movie into the environment and reset to its initial state
+    env.initial_state = movie.get_state()
+    env.reset()
+
+    # Apply the ResizeObservation wrapper after loading the movie
+    env = ResizeObservation(env, 84)
+
+    # Initialize the DQN and start training
     dqn = DQN(env, movie)
     dqn.train_episode()
+
+    # Render and close the environment
     env.render(close=True)
     movie.close()
     env.close()
