@@ -313,7 +313,7 @@ for i in range(5000):
         players=movie.players,
     )
     dqn = DQN(env, movie)
-    dqn.train_episode_finetuning(i)  # self.train_episode() to get the training side working
+    dqn.train_episode()
     env.render(close=True)
     movie.close()
     env.close()
