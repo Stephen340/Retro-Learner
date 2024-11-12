@@ -101,8 +101,8 @@ class DQN:
         for p in self.target_model.parameters():
             p.requires_grad = False
 
-        if os.path.exists('mario_new_data.pth'):
-            self.load_model('mario_new_data.pth')
+        if os.path.exists('mario_rightward.pth'):
+            self.load_model('mario_rightward.pth')
         self.model.to('cuda')
         self.target_model.to('cuda')
 
@@ -111,8 +111,8 @@ class DQN:
 
         # Number of training steps so far
         self.n_steps = 0
-        self.epsilon = 0.  # Start with full exploration
-        self.epsilon_min = 0.8  # Minimum exploration
+        self.epsilon = 0.8  # Start with full exploration
+        self.epsilon_min = 0.05  # Minimum exploration
         self.epsilon_decay = 0.995  # Decay rate
         self.leftward_counter = 0  # Each frame with left movement
 
@@ -317,7 +317,6 @@ class DQN:
 
         # Decay epsilon after each episode
         self.decay_epsilon()
-        self.save_model("mario_new_data.pth")
 
     def __str__(self):
         return "DQN"
@@ -337,5 +336,5 @@ env = retro.make(
         players=movie.players,
     )
 dqn = DQN(env, movie)
-dqn.load_model('mario_rightward.pth')
+dqn.load_model('mario_rightward_copy_saved.pth')
 dqn.handle_episodes()
