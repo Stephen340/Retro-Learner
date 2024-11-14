@@ -1,3 +1,4 @@
+import gc
 import os
 import random
 from collections import deque
@@ -13,6 +14,23 @@ from PIL import Image
 from torchvision import transforms as T
 from gym import ObservationWrapper
 from gym.spaces import Box
+from gym import Wrapper
+
+class FrameSkip(Wrapper):
+    def __init__(self, env, skip=4):
+        super().__init__(env)
+        self.skip = skip
+
+    def step(self, action):
+        total_reward = 0.0
+        done = False
+        for _ in range(self.skip):
+            obs, reward, done, info = self.env.step(action)
+            total_reward += reward
+            if done:
+                break
+        return obs, total_reward, done, info
+
 
 
 class ResizeObservation(ObservationWrapper):
@@ -27,7 +45,9 @@ class ResizeObservation(ObservationWrapper):
         self.observation_space = Box(low=0, high=255, shape=obs_shape, dtype=np.uint8)
 
     def observation(self, observation):
-        # Convert numpy array to PIL image
+        # Ensure observation is a numpy array
+        if isinstance(observation, torch.Tensor):
+            observation = observation.cpu().numpy()
         observation = Image.fromarray(observation)
 
         # Apply transformations: resize to specified shape and grayscale, then normalize and convert to tensor
@@ -141,15 +161,16 @@ class DQN:
         self.epsilon_decay = 0.995  # Decay rate
         self.leftward_counter = 0  # Each frame with left movement
 
-    def handle_episodes(self):
-        for i in range(20000):
-            print(i)
-            self.env.initial_state = movie.get_state()
-            self.env.reset()
-            self.env = ResizeObservation(env, 84)
-            dqn.train_episode_finetuning(i)
-            dqn.save_model('mario_downsized.pth')
-            env.reset()
+    # def handle_episodes(self):
+    #     for i in range(20000):
+    #         print(i)
+    #         self.env.initial_state = movie.get_state()
+    #         self.env.reset()
+    #         self.env = FrameSkip(self.env, skip=4)
+    #         self.env = ResizeObservation(env, 84)
+    #         dqn.train_episode_finetuning(i)
+    #         dqn.save_model('mario_downsized.pth')
+    #         env.reset()
 
     def update_target_model(self):
         # Copy weights from model to target_model
@@ -347,18 +368,50 @@ class DQN:
 
 
 if torch.cuda.is_available():
+    print("GPU")
     torch.set_default_device('cuda')
 
+
 files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3', 'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
-path = 'C:/Users/stjoh/Documents/CSCE 642/' + 'a' + '.bk2'
-movie = retro.Movie(path)
-env = retro.make(
+path = 'C:/Users/STJoh/Documents/ReinforcementProject/Retro-Learner/' + 'a' + '.bk2'
+
+# Main training loop
+for i in range(20000):
+    print(f"Starting episode {i}")
+
+    # Load movie file and environment setup
+    movie = retro.Movie(path)
+    env = retro.make(
         game=movie.get_game(),
         state=None,
-        # bk2s can contain any button presses, so allow everything
         use_restricted_actions=retro.Actions.ALL,
         players=movie.players,
     )
-dqn = DQN(env, movie)
-dqn.load_model('mario_downsized.pth')
-dqn.handle_episodes()
+
+    env.initial_state = movie.get_state()
+    env.reset()
+    # Apply the wrappers
+    env = FrameSkip(env, skip=4)
+    env = ResizeObservation(env, 84)
+
+    # Initialize DQN with the environment and movie
+    dqn = DQN(env, movie)
+
+    # Optionally load the model if you have pre-saved weights
+    if os.path.exists('mario_downsized.pth'):
+        dqn.load_model('mario_downsized.pth')
+
+    # Run one episode of training
+    dqn.train_episode_finetuning(i)
+
+    # Save model after each episode or as desired
+    dqn.save_model('mario_downsized.pth')
+
+    # Clean up after each episode
+    env.render(close=True)
+    movie.close()
+    env.close()
+    del env
+    del movie
+    gc.collect()
+

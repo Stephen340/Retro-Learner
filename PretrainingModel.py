@@ -323,10 +323,10 @@ if torch.cuda.is_available():
 
 files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3', 'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
 
-for i in range(5000):
+for i in range(1000):
     print(i)
     i = i % 27
-    path = 'C:/Users/stjoh/Documents/CSCE 642/' + files[i] + '.bk2'
+    path = 'C:/Users/STJoh/Documents/ReinforcementProject/Retro-Learner/' + files[i] + '.bk2'
     movie = retro.Movie(path)
     movie.step()  # Ensure the movie is stepped to initialize its state properly
 

@@ -31,7 +31,10 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
-
+*.bk2
+*.json
+*.sha
+*..nes
 # Ignore the model saving because otherwise it's too big
 *.pth
 
