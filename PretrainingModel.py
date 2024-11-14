@@ -300,7 +300,7 @@ class DQN:
             # update replay memory & model
             self.memorize(state, chosen_action_id, reward, next_state, done)
             self.replay()
-            self.env.render()
+            # self.env.render()
             if done:
                 break
 

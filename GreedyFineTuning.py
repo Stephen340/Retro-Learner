@@ -9,6 +9,36 @@ import torch
 import torch.nn as nn
 from torchvision import transforms
 from torch.optim import AdamW
+from PIL import Image
+from torchvision import transforms as T
+from gym import ObservationWrapper
+from gym.spaces import Box
+
+
+class ResizeObservation(ObservationWrapper):
+    def __init__(self, env, shape):
+        super().__init__(env)
+        if isinstance(shape, int):
+            self.shape = (shape, shape)
+        else:
+            self.shape = tuple(shape)
+
+        obs_shape = self.shape + self.observation_space.shape[2:]
+        self.observation_space = Box(low=0, high=255, shape=obs_shape, dtype=np.uint8)
+
+    def observation(self, observation):
+        # Convert numpy array to PIL image
+        observation = Image.fromarray(observation)
+
+        # Apply transformations: resize to specified shape and grayscale, then normalize and convert to tensor
+        transform = T.Compose([
+            T.Resize(self.shape),
+            T.Grayscale(),
+            T.ToTensor(),  # Converts to [0, 1] tensor
+            T.Lambda(lambda x: x * 255)  # Rescale back to [0, 255] range as a tensor
+        ])
+        observation = transform(observation)
+        return observation
 
 
 def convertAct(action):
@@ -53,19 +83,14 @@ class CustomCNN(nn.Module):
     def __init__(self):
         super(CustomCNN, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=64, kernel_size=8, stride=4),
+            nn.Conv2d(in_channels=1, out_channels=32, kernel_size=8, stride=4),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2),
             nn.ReLU(),
-            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(256 * 8 * 9, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 512),
+            nn.Linear(3136, 512),
             nn.ReLU(),
             nn.Linear(512, N_ACTIONS),
         )
@@ -101,8 +126,8 @@ class DQN:
         for p in self.target_model.parameters():
             p.requires_grad = False
 
-        if os.path.exists('mario_rightward.pth'):
-            self.load_model('mario_rightward.pth')
+        if os.path.exists('mario_downsized.pth'):
+            self.load_model('mario_downsized.pth')
         self.model.to('cuda')
         self.target_model.to('cuda')
 
@@ -111,16 +136,19 @@ class DQN:
 
         # Number of training steps so far
         self.n_steps = 0
-        self.epsilon = 0.5  # Start with full exploration
+        self.epsilon = 0.8  # Start with full exploration
         self.epsilon_min = 0.05  # Minimum exploration
         self.epsilon_decay = 0.995  # Decay rate
         self.leftward_counter = 0  # Each frame with left movement
 
     def handle_episodes(self):
-        for i in range(5000):
+        for i in range(20000):
             print(i)
+            self.env.initial_state = movie.get_state()
+            self.env.reset()
+            self.env = ResizeObservation(env, 84)
             dqn.train_episode_finetuning(i)
-            dqn.save_model('mario_rightward.pth')
+            dqn.save_model('mario_downsized.pth')
             env.reset()
 
     def update_target_model(self):
@@ -149,31 +177,26 @@ class DQN:
         print(f"Model loaded from {path}")
 
     def greedy(self, state):
-        grayscale_transform = transforms.Grayscale()
-        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).unsqueeze(0).float()
+        state = state.to('cuda').float().unsqueeze(0)
         action_values = self.model(state)
-        print(action_values)
+        # print(action_values)
         return torch.argmax(action_values).item()
 
     def epsilon_greedy(self, state):
         nA = N_ACTIONS
-        grayscale_transform = transforms.Grayscale()
-        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).unsqueeze(0).float()
+        # Assuming `state` is already in the right format (1, 84, 84)
+        state = state.to('cuda').float().unsqueeze(0)  # Add batch dimension for model
         action_values = self.model(state)
-
-        # Exploration vs. Exploitation choice
-        if random.random() < self.epsilon:  # 0.80 is self.epsilon
-            # Choose a random action
+        if random.random() < self.epsilon:
+            # Random action
             chosen_action = np.random.choice(np.arange(nA))
         else:
-            # Choose the best action based on model predictions
             chosen_action = torch.argmax(action_values).item()
-
         return chosen_action
 
     def decay_epsilon(self):
         if self.epsilon > self.epsilon_min:
-            print(self.epsilon * self.epsilon_decay)
+            # print(self.epsilon * self.epsilon_decay)
             self.epsilon *= self.epsilon_decay
 
     def compute_target_values(self, next_states, rewards, dones):
@@ -238,8 +261,8 @@ class DQN:
             dones = torch.as_tensor(np.array(dones), dtype=torch.float32).to('cuda')
 
             # Reshape to flatten batch and chunk for model input
-            states = states.view(-1, 1, 224, 240)
-            next_states = next_states.view(-1, 1, 224, 240)
+            states = states.view(-1, 1, 84, 84)
+            next_states = next_states.view(-1, 1, 84, 84)
 
             # Calculate current Q-values
             current_q = self.model(states)
@@ -251,7 +274,7 @@ class DQN:
 
             with torch.no_grad():
                 # Compute target Q-values
-                next_states = next_states.view(-1, 1, 224, 240)
+                next_states = next_states.view(-1, 1, 84, 84)
                 target_q = self.compute_target_values(next_states, rewards, dones)
                 target_q = target_q.view(16, 4)
 
@@ -265,14 +288,15 @@ class DQN:
             self.optimizer.step()
 
     def memorize(self, state, action, reward, next_state, done):
-        # print(state.shape)
-        grayscale_transform = transforms.Grayscale()
-        state = grayscale_transform(torch.tensor(state).permute(2, 0, 1)).cpu().numpy()  # (224, 240)
-        next_state = grayscale_transform(torch.tensor(next_state).permute(2, 0, 1)).cpu().numpy()  # (224, 240)
-        state = np.expand_dims(state, axis=0)  # Now (1, 224, 240)
-        next_state = np.expand_dims(next_state, axis=0)  # Now (1, 224, 240)
+        # Ensure state and next_state are in tensor format and on CPU as numpy arrays
+        state = torch.tensor(state).cpu().numpy()  # (1, 84, 84)
+        next_state = torch.tensor(next_state).cpu().numpy()  # (1, 84, 84)
 
-        # Save the grayscale states in the buffer
+        # Add the grayscale channel dimension if needed
+        state = np.expand_dims(state, axis=0)  # (1, 1, 84, 84)
+        next_state = np.expand_dims(next_state, axis=0)  # (1, 1, 84, 84)
+
+        # Save the states in the replay buffer
         self.sequence_buffer.append((state, action, reward, next_state, done))
         if len(self.sequence_buffer) == self.chunk_size:
             self.replay_memory.append(list(self.sequence_buffer))
@@ -302,7 +326,7 @@ class DQN:
             # Store in replay buffer and learn from experience
             self.memorize(state, chosen_action_id, reward, next_state, done)
             self.replay()
-            self.env.render()
+            # self.env.render()
 
             if done:
                 self.update_target_model()
@@ -336,5 +360,5 @@ env = retro.make(
         players=movie.players,
     )
 dqn = DQN(env, movie)
-dqn.load_model('mario_rightward_copy_saved.pth')
+dqn.load_model('mario_downsized.pth')
 dqn.handle_episodes()
