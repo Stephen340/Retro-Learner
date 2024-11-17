@@ -8,6 +8,9 @@ import numpy as np
 import retro
 import torch
 import torch.nn as nn
+import matplotlib
+import matplotlib.pyplot as plt
+from sympy.physics.units import action
 from torchvision import transforms
 from torch.optim import AdamW
 from PIL import Image
@@ -15,6 +18,10 @@ from torchvision import transforms as T
 from gym import ObservationWrapper
 from gym.spaces import Box
 from gym import Wrapper
+
+
+total_reward = []
+
 
 class FrameSkip(Wrapper):
     def __init__(self, env, skip=4):
@@ -146,8 +153,8 @@ class DQN:
         for p in self.target_model.parameters():
             p.requires_grad = False
 
-        if os.path.exists('mario_downsized.pth'):
-            self.load_model('mario_downsized.pth')
+        if os.path.exists('mario_downsized2.pth'):
+            self.load_model('mario_downsized2.pth')
         self.model.to('cuda')
         self.target_model.to('cuda')
 
@@ -156,21 +163,10 @@ class DQN:
 
         # Number of training steps so far
         self.n_steps = 0
-        self.epsilon = 0.8  # Start with full exploration
+        self.epsilon = 0.9  # Start with full exploration
         self.epsilon_min = 0.05  # Minimum exploration
-        self.epsilon_decay = 0.995  # Decay rate
+        self.epsilon_decay = 0.99999975  # Decay rate
         self.leftward_counter = 0  # Each frame with left movement
-
-    # def handle_episodes(self):
-    #     for i in range(20000):
-    #         print(i)
-    #         self.env.initial_state = movie.get_state()
-    #         self.env.reset()
-    #         self.env = FrameSkip(self.env, skip=4)
-    #         self.env = ResizeObservation(env, 84)
-    #         dqn.train_episode_finetuning(i)
-    #         dqn.save_model('mario_downsized.pth')
-    #         env.reset()
 
     def update_target_model(self):
         # Copy weights from model to target_model
@@ -198,10 +194,15 @@ class DQN:
         print(f"Model loaded from {path}")
 
     def greedy(self, state):
-        state = state.to('cuda').float().unsqueeze(0)
-        action_values = self.model(state)
-        # print(action_values)
-        return torch.argmax(action_values).item()
+        state = state.to('cuda').float().unsqueeze(0)  # Prepare the input
+        action_values = self.model(state)  # Forward pass through the model
+
+        # Extract the 1st and 3rd index values and compute their maximum
+        indices = [1, 3]
+        selected_values = action_values[0, indices]  # Assuming action_values is 2D [batch_size, num_actions]
+        max_index = indices[torch.argmax(selected_values).item()]  # Get the index of the maximum value
+
+        return max_index
 
     def epsilon_greedy(self, state):
         nA = N_ACTIONS
@@ -211,6 +212,10 @@ class DQN:
         if random.random() < self.epsilon:
             # Random action
             chosen_action = np.random.choice(np.arange(nA))
+            if chosen_action <= 2:
+                chosen_action = 1
+            else:
+                chosen_action = 3
         else:
             chosen_action = torch.argmax(action_values).item()
         return chosen_action
@@ -233,17 +238,18 @@ class DQN:
         pxpos = previnfo['x_position2'] + previnfo['xscrollLo'] + 256 * previnfo['xscrollHi']
         xpos = info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']
 
+        # Calculate changes
+        dpos = xpos - pxpos  # Change in x position
+        dtime = info['time'] - previnfo['time']  # Change in time
+
         # Check status flags
         isDead = info['player_state'] == 6 or info['player_state'] == 11
         if isDead:
             return -100
         isFlag = info['player_state'] == 4
         if isFlag:
-            return 2000  # Reward for reaching the flag
-
-        # Calculate changes
-        dpos = xpos - pxpos  # Change in x position
-        dtime = info['time'] - previnfo['time']  # Change in time
+            print('FFFFFFFFFFFFFFFLLLLLLLLLLLLLLLLLLLLLAAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGGGGGGGGGGGGGGGGGGGG')
+            return 5000 + dpos * 2 if dpos > 0 else -5  # Reward for reaching the flag
 
         # Reward components
         rightward_reward = dpos * 2 if dpos > 0 else -5  # 2x reward for moving right, -5 for left
@@ -323,9 +329,9 @@ class DQN:
             self.replay_memory.append(list(self.sequence_buffer))
 
     def train_episode_finetuning(self, save_index):
+        full_reward = 0
         state = self.env.reset()
         previnfo = None
-        max_loc = -10
 
         for _ in range(131072):  # Self.options.steps
             # Choose action with exploration
@@ -337,31 +343,27 @@ class DQN:
                 reward = self.myreward(info, previnfo)
             else:
                 reward = 0
-
-            if reward == -100:
-                done |= True
-
-            if (info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']) > max_loc:
-                max_loc = info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']
+            full_reward += reward
 
             # Store in replay buffer and learn from experience
             self.memorize(state, chosen_action_id, reward, next_state, done)
             self.replay()
-            # self.env.render()
+            self.env.render()
 
             if done:
-                self.update_target_model()
                 break
 
             state = next_state
             self.n_steps += 1
-            if self.n_steps % 1000 == 0:
+            if self.n_steps % 50000 == 0:
                 self.update_target_model()
+                print("Update")
 
             previnfo = info
-
+        total_reward.append(full_reward)
         # Decay epsilon after each episode
         self.decay_epsilon()
+        print(self.epsilon)
 
     def __str__(self):
         return "DQN"
@@ -375,43 +377,48 @@ if torch.cuda.is_available():
 files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3', 'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
 path = 'C:/Users/STJoh/Documents/ReinforcementProject/Retro-Learner/' + 'a' + '.bk2'
 
-# Main training loop
-for i in range(20000):
+# Initialize movie and environment once
+movie = retro.Movie(path)
+env = retro.make(
+    game=movie.get_game(),
+    state=None,
+    use_restricted_actions=retro.Actions.ALL,
+    players=movie.players,
+)
+env.initial_state = movie.get_state()
+env.reset()
+env = FrameSkip(env, skip=4)  # Apply frame skipping
+env = ResizeObservation(env, 84)  # Resize observation
+
+# Initialize DQN only once
+dqn = DQN(env, movie)
+
+# Optionally load the model if you have pre-saved weights
+if os.path.exists('mario_downsized2.pth'):
+    dqn.load_model('mario_downsized2.pth')
+
+# Main training loop across episodes
+for i in range(90000):
     print(f"Starting episode {i}")
-
-    # Load movie file and environment setup
-    movie = retro.Movie(path)
-    env = retro.make(
-        game=movie.get_game(),
-        state=None,
-        use_restricted_actions=retro.Actions.ALL,
-        players=movie.players,
-    )
-
     env.initial_state = movie.get_state()
-    env.reset()
-    # Apply the wrappers
-    env = FrameSkip(env, skip=4)
-    env = ResizeObservation(env, 84)
-
-    # Initialize DQN with the environment and movie
-    dqn = DQN(env, movie)
-
-    # Optionally load the model if you have pre-saved weights
-    if os.path.exists('mario_downsized.pth'):
-        dqn.load_model('mario_downsized.pth')
-
-    # Run one episode of training
+    dqn.env.reset()
+    # Train for one episode
     dqn.train_episode_finetuning(i)
 
     # Save model after each episode or as desired
-    dqn.save_model('mario_downsized.pth')
+    dqn.save_model('mario_downsized2.pth')
 
-    # Clean up after each episode
-    env.render(close=True)
-    movie.close()
-    env.close()
-    del env
-    del movie
-    gc.collect()
+    if i % 1000 == 0:
+        # Plot rewards
+        plt.figure(figsize=(10, 6))
+        plt.plot(total_reward, label='Episode Reward')
+        plt.xlabel('Episode')
+        plt.ylabel('Total Reward')
+        plt.title('Total Reward per Episode')
+        plt.legend()
+        plt.grid()
+        plt.savefig('episode_rewards.png')
+        plt.close()
 
+# Close the environment when training is done
+env.close()
