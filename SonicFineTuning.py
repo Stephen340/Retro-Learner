@@ -8,20 +8,52 @@ import numpy as np
 import retro
 import torch
 import torch.nn as nn
-import matplotlib
-import matplotlib.pyplot as plt
-from sympy.physics.units import action
 from torchvision import transforms
-from torch.optim import AdamW
-from PIL import Image
 from torchvision import transforms as T
+from torch.optim import AdamW
 from gym import ObservationWrapper
 from gym.spaces import Box
+from PIL import Image
+import matplotlib.pyplot as plt
 from gym import Wrapper
 
+rewards_per_episode = []
 
-total_reward = []
+def convertAct(action):
+    if action[1] or action[8]:  # There are three jump buttons; capture all in action[0]
+        action[0] = 1
 
+    if action[5]:  # Down is pressed
+        if action[0]:
+            return 6  # Down, Up
+        elif action[7]:
+            return 4  # Down, Right
+        elif action[6]:
+            return 3  # Left, Down
+        else:
+            return 5  # Down
+    elif action[7]:
+        return 2  # right
+    elif action[6]:
+        return 1  # left
+    elif action[0]:
+        return 7  # Jump
+    else:
+        return 0 # no action
+
+action_switch = {
+            0: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  # No Operation
+            1: [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],  # Left
+            2: [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],  # Right
+            3: [0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0],  # Left, Down
+            4: [0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0],  # Right, Down
+            5: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],  # Down
+            6: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],  # Down, B
+            7: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]   # B
+}
+
+def convertActBack(actionID):
+    return action_switch[actionID]
 
 class FrameSkip(Wrapper):
     def __init__(self, env, skip=4):
@@ -39,7 +71,6 @@ class FrameSkip(Wrapper):
         return obs, total_reward, done, info
 
 
-
 class ResizeObservation(ObservationWrapper):
     def __init__(self, env, shape):
         super().__init__(env)
@@ -52,9 +83,7 @@ class ResizeObservation(ObservationWrapper):
         self.observation_space = Box(low=0, high=255, shape=obs_shape, dtype=np.uint8)
 
     def observation(self, observation):
-        # Ensure observation is a numpy array
-        if isinstance(observation, torch.Tensor):
-            observation = observation.cpu().numpy()
+        # Convert numpy array to PIL image
         observation = Image.fromarray(observation)
 
         # Apply transformations: resize to specified shape and grayscale, then normalize and convert to tensor
@@ -68,42 +97,7 @@ class ResizeObservation(ObservationWrapper):
         return observation
 
 
-def convertAct(action):
-    if action[-1] == 1:  # Jumping
-        if action[-2] == 1:  # Moving right
-            return 3
-        elif action[-3] == 1:  # Moving left
-            return 5
-        else:
-            return 2  # Jumping
-    else:
-        if action[-2] == 1:  # Not jumping moving right
-            return 1
-        elif action[-3] == 1:  # Not jumping moving left
-            return 4
-        else:
-            return 0  # Standing still
-
-
-def convertActBack(actionID):
-    if actionID == 0:
-        return [0, 0, 0, 0, 0, 0, 0, 0, 0]
-    elif actionID == 1:
-        return [0, 0, 0, 0, 0, 0, 0, 1, 0]
-    elif actionID == 2:
-        return [0, 0, 0, 0, 0, 0, 0, 0, 1]
-    elif actionID == 3:
-        return [0, 0, 0, 0, 0, 0, 0, 1, 1]
-    elif actionID == 4:
-        return [0, 0, 0, 0, 0, 0, 1, 0, 0]
-    elif actionID == 5:
-        return [0, 0, 0, 0, 0, 0, 1, 0, 1]
-    else:
-        # print("Unknown actionID", actionID)
-        return [0, 0, 0, 0, 0, 0, 0, 0, 0]
-
-
-N_ACTIONS = 6
+N_ACTIONS = 12
 
 
 class CustomCNN(nn.Module):
@@ -153,8 +147,8 @@ class DQN:
         for p in self.target_model.parameters():
             p.requires_grad = False
 
-        if os.path.exists('mario_downsized2.pth'):
-            self.load_model('mario_downsized2.pth')
+        if os.path.exists('sonic_finetuning.pth'):
+            self.load_model('sonic_finetuning.pth')
         self.model.to('cuda')
         self.target_model.to('cuda')
 
@@ -163,10 +157,9 @@ class DQN:
 
         # Number of training steps so far
         self.n_steps = 0
-        self.epsilon = 0.1  # Start with full exploration
+        self.epsilon = 0.9  # Start with full exploration
         self.epsilon_min = 0.05  # Minimum exploration
-        self.epsilon_decay = 1.0  # Decay rate
-        self.leftward_counter = 0  # Each frame with left movement
+        self.epsilon_decay = 0.99999975  # Decay rate
 
     def update_target_model(self):
         # Copy weights from model to target_model
@@ -193,38 +186,6 @@ class DQN:
         self.target_model.load_state_dict(checkpoint['target_model_state_dict'])
         print(f"Model loaded from {path}")
 
-    def greedy(self, state):
-        state = state.to('cuda').float().unsqueeze(0)  # Prepare the input
-        action_values = self.model(state)  # Forward pass through the model
-
-        # Extract the 1st and 3rd index values and compute their maximum
-        indices = [1, 3]
-        selected_values = action_values[0, indices]  # Assuming action_values is 2D [batch_size, num_actions]
-        max_index = indices[torch.argmax(selected_values).item()]  # Get the index of the maximum value
-
-        return max_index
-
-    def epsilon_greedy(self, state):
-        nA = N_ACTIONS
-        # Assuming `state` is already in the right format (1, 84, 84)
-        state = state.to('cuda').float().unsqueeze(0)  # Add batch dimension for model
-        action_values = self.model(state)
-        if random.random() < self.epsilon:
-            # Random action
-            chosen_action = np.random.choice(np.arange(nA))
-            if chosen_action <= 2:
-                chosen_action = 1
-            else:
-                chosen_action = 3
-        else:
-            chosen_action = torch.argmax(action_values).item()
-        return chosen_action
-
-    def decay_epsilon(self):
-        if self.epsilon > self.epsilon_min:
-            # print(self.epsilon * self.epsilon_decay)
-            self.epsilon *= self.epsilon_decay
-
     def compute_target_values(self, next_states, rewards, dones):
         next_q_vals = self.target_model(next_states)  # Shape should be (64 * 4, num_actions)
         best_next_q_vals = torch.max(next_q_vals, dim=1)[0]  # Shape should be (64 * 4)
@@ -232,32 +193,6 @@ class DQN:
         target = rewards + 0.9 * best_next_q_vals * (1 - dones)  # 0.9 is gamma
 
         return target
-
-    def myreward(self, info, previnfo):
-        # Calculate positions
-        pxpos = previnfo['x_position2'] + previnfo['xscrollLo'] + 256 * previnfo['xscrollHi']
-        xpos = info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']
-
-        # Calculate changes
-        dpos = xpos - pxpos  # Change in x position
-        dtime = info['time'] - previnfo['time']  # Change in time
-
-        # Check status flags
-        isDead = info['player_state'] == 6 or info['player_state'] == 11
-        if isDead:
-            return -100
-        isFlag = info['player_state'] == 4
-        if isFlag:
-            print('FFFFFFFFFFFFFFFLLLLLLLLLLLLLLLLLLLLLAAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGGGGGGGGGGGGGGGGGGGG')
-            return 5000 + dpos * 2 if dpos > 0 else -5  # Reward for reaching the flag
-
-        # Reward components
-        rightward_reward = dpos * 2 if dpos > 0 else -5  # 2x reward for moving right, -5 for left
-        time_bonus = 0.05 * dtime  # Smaller time reward
-
-        # Final reward calculation
-        reward = rightward_reward + time_bonus
-        return reward
 
     def replay(self):
         if len(self.replay_memory) > 16:  # 64 is self.options.batch_size
@@ -296,8 +231,9 @@ class DQN:
             current_q = current_q.view(16, 4, -1)  # Reshape back to (batch_size, chunk_size, num_actions)
 
             # Gather Q-values for actions taken in replay memory
-            actions = actions.unsqueeze(-1)  # Shape (64, 4, 1) to match current_q for gather
-            current_q = torch.gather(current_q, dim=2, index=actions).squeeze(-1)  # Shape (64, 4)
+            actions = actions.unsqueeze(-1)  # Shape (16, 4, 1) to match current_q for gather
+
+            current_q = torch.gather(current_q, dim=2, index=actions).squeeze(-1)  # Shape (16, 4)
 
             with torch.no_grad():
                 # Compute target Q-values
@@ -328,57 +264,66 @@ class DQN:
         if len(self.sequence_buffer) == self.chunk_size:
             self.replay_memory.append(list(self.sequence_buffer))
 
-    def train_episode_finetuning(self, save_index):
-        full_reward = 0
-        state = self.env.reset()
-        previnfo = None
+    def epsilon_greedy(self, state):
+        nA = N_ACTIONS
+        # Assuming `state` is already in the right format (1, 84, 84)
+        state = state.to('cuda').float().unsqueeze(0)  # Add batch dimension for model
+        action_values = self.model(state)
+        if random.random() < self.epsilon:
+            # Random action
+            chosen_action = np.random.choice(np.arange(nA))
+        else:
+            chosen_action = torch.argmax(action_values).item()
+        return chosen_action
 
+    def greedy(self, state):
+        state = state.to('cuda').float().unsqueeze(0)
+        action_values = self.model(state)
+        # print(action_values)
+        return torch.argmax(action_values).item()
+
+    def train_episode(self):
+        state = self.env.reset()
+        prev_info = None
         for _ in range(131072):  # Self.options.steps
-            # Choose action with exploration
-            chosen_action_id = self.epsilon_greedy(state)
+            # If a movie is loaded, step through the movie instead
+            chosen_action_id = self.greedy(state)
             chosen_action = convertActBack(chosen_action_id)
 
+            # step through the environment with the chosen action
             next_state, reward, done, info = self.env.step(chosen_action)
-            if previnfo is not None:
-                reward = self.myreward(info, previnfo)
-            else:
-                reward = 0
-            full_reward += reward
 
-            # Store in replay buffer and learn from experience
+            if prev_info is not None:
+                reward = self.myreward(info, prev_info)
+            prev_info = info
+            # print(reward)
+            rewards_per_episode.append(reward)
+
+            # update replay memory & model
             self.memorize(state, chosen_action_id, reward, next_state, done)
             self.replay()
             self.env.render()
 
+            # Update variables for next step
+            state = next_state
+            self.n_steps += 1
+            if self.n_steps % 30000 == 0:
+                print("UPDATE")
+                self.update_target_model()
+
             if done:
                 break
 
-            state = next_state
-            self.n_steps += 1
-            if self.n_steps % 50000 == 0:
-                self.update_target_model()
-                print("Update")
-
-            previnfo = info
-        total_reward.append(full_reward)
-        # Decay epsilon after each episode
-        self.decay_epsilon()
-        print(self.epsilon)
+        # self.save_model("sonic_pretrained.pth")
 
     def __str__(self):
         return "DQN"
 
 
 if torch.cuda.is_available():
-    print("GPU")
     torch.set_default_device('cuda')
 
-
-files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3', 'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
-path = 'C:/Users/stjoh/Documents/CSCE 642/' + 'a' + '.bk2'
-
-# Initialize movie and environment once
-movie = retro.Movie(path)
+movie = retro.Movie('C:/Users/stjoh/Documents/CSCE 642/SonicRecordings/sa.bk2')
 env = retro.make(
     game=movie.get_game(),
     state=None,
@@ -393,32 +338,17 @@ env = ResizeObservation(env, 84)  # Resize observation
 # Initialize DQN only once
 dqn = DQN(env, movie)
 
-# Optionally load the model if you have pre-saved weights
-if os.path.exists('mario_downsized2.pth'):
-    dqn.load_model('mario_downsized2.pth')
-
-# Main training loop across episodes
-for i in range(90000):
-    print(f"Starting episode {i}")
+for i in range(40000):
+    print(f"Episode {i + 1}")
     env.initial_state = movie.get_state()
     dqn.env.reset()
-    # Train for one episode
-    dqn.train_episode_finetuning(i)
-
-    # Save model after each episode or as desired
-    dqn.save_model('mario_downsized2.pth')
+    dqn.train_episode()
+    dqn.save_model("sonic_finetuning.pth")
 
     if i % 1000 == 0:
         # Plot rewards
-        plt.figure(figsize=(10, 6))
-        plt.plot(total_reward, label='Episode Reward')
+        plt.plot(rewards_per_episode)
         plt.xlabel('Episode')
         plt.ylabel('Total Reward')
-        plt.title('Total Reward per Episode')
-        plt.legend()
-        plt.grid()
-        plt.savefig('episode_rewards.png')
-        plt.close()
-
-# Close the environment when training is done
-env.close()
+        plt.title('Rewards Per Episode')
+        plt.savefig('rewards_per_episode_sonic.png')
