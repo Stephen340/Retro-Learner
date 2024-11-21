@@ -348,7 +348,7 @@ class DQN:
             # Store in replay buffer and learn from experience
             self.memorize(state, chosen_action_id, reward, next_state, done)
             self.replay()
-            self.env.render()
+            # self.env.render()
 
             if done:
                 break
