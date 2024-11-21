@@ -326,7 +326,8 @@ files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', '
 for i in range(5000):
     print(i)
     i = i % 27
-    path = 'C:/Users/stjoh/Documents/CSCE 642/' + files[i] + '.bk2'
+    # path = 'C:/Users/stjoh/Documents/CSCE 642/' + files[i] + '.bk2'
+    path = 'C:/Users/sturt/Desktop/replays/' + files[i] + '.bk2'
     movie = retro.Movie(path)
     movie.step()  # Ensure the movie is stepped to initialize its state properly
 
