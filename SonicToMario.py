@@ -8,17 +8,13 @@ import numpy as np
 import retro
 import torch
 import torch.nn as nn
-import matplotlib
 import matplotlib.pyplot as plt
-from sympy.physics.units import action
-from torchvision import transforms
 from torch.optim import AdamW
 from PIL import Image
 from torchvision import transforms as T
 from gym import ObservationWrapper
 from gym.spaces import Box
 from gym import Wrapper
-
 
 total_reward = []
 
@@ -37,7 +33,6 @@ class FrameSkip(Wrapper):
             if done:
                 break
         return obs, total_reward, done, info
-
 
 
 class ResizeObservation(ObservationWrapper):
@@ -153,8 +148,8 @@ class DQN:
         for p in self.target_model.parameters():
             p.requires_grad = False
 
-        if os.path.exists('mario_downsized2.pth'):
-            self.load_model('mario_downsized2.pth')
+        if os.path.exists('sonic_pretrained.pth'):
+            self.load_model('sonic_pretrained.pth')
         self.model.to('cuda')
         self.target_model.to('cuda')
 
@@ -163,7 +158,7 @@ class DQN:
 
         # Number of training steps so far
         self.n_steps = 0
-        self.epsilon = 0.1  # Start with full exploration
+        self.epsilon = 0.9  # Start with full exploration
         self.epsilon_min = 0.05  # Minimum exploration
         self.epsilon_decay = 1.0  # Decay rate
         self.leftward_counter = 0  # Each frame with left movement
@@ -373,8 +368,8 @@ if torch.cuda.is_available():
     print("GPU")
     torch.set_default_device('cuda')
 
-
-files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3', 'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
+files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3',
+         'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
 path = 'C:/Users/stjoh/Documents/CSCE 642/' + 'a' + '.bk2'
 
 # Initialize movie and environment once
@@ -394,8 +389,8 @@ env = ResizeObservation(env, 84)  # Resize observation
 dqn = DQN(env, movie)
 
 # Optionally load the model if you have pre-saved weights
-if os.path.exists('mario_downsized2.pth'):
-    dqn.load_model('mario_downsized2.pth')
+if os.path.exists('sonic_pretrained.pth'):
+    dqn.load_model('sonic_pretrained.pth')
 
 # Main training loop across episodes
 for i in range(90000):
@@ -406,7 +401,7 @@ for i in range(90000):
     dqn.train_episode_finetuning(i)
 
     # Save model after each episode or as desired
-    dqn.save_model('mario_downsized2.pth')
+    dqn.save_model('sonic_to_mario_finetuned.pth')
 
     if i % 1000 == 0:
         # Plot rewards

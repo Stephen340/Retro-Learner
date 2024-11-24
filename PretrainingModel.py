@@ -14,6 +14,23 @@ from torch.optim import AdamW
 from gym import ObservationWrapper
 from gym.spaces import Box
 from PIL import Image
+from gym import Wrapper
+
+
+class FrameSkip(Wrapper):
+    def __init__(self, env, skip=4):
+        super().__init__(env)
+        self.skip = skip
+
+    def step(self, action):
+        total_reward = 0.0
+        done = False
+        for _ in range(self.skip):
+            obs, reward, done, info = self.env.step(action)
+            total_reward += reward
+            if done:
+                break
+        return obs, total_reward, done, info
 
 
 class ResizeObservation(ObservationWrapper):
@@ -288,19 +305,19 @@ class DQN:
             # step through the environment with the chosen action
             next_state, reward, done, info = self.env.step(chosen_action)
             # calculate reward using previous data for mario
-            if previnfo is not None:
-                # print(self.myreward(info, previnfo, max_loc))
-                reward = self.myreward(info, previnfo)
-            else:
-                reward = 0
-
-            if reward < -10:
-                done |= True
+            # if previnfo is not None:
+            #     # print(self.myreward(info, previnfo, max_loc))
+            #     reward = self.myreward(info, previnfo)
+            # else:
+            #     reward = 0
+            #
+            # if reward < -10:
+            #     done |= True
 
             # update replay memory & model
             self.memorize(state, chosen_action_id, reward, next_state, done)
             self.replay()
-            # self.env.render()
+            self.env.render()
             if done:
                 break
 
@@ -310,9 +327,9 @@ class DQN:
             if self.n_steps % 3000 == 0:
                 self.update_target_model()
 
-            previnfo = info
+            # previnfo = info
 
-        self.save_model("mario_downsized.pth")
+        self.save_model("trial_downsized.pth")
 
     def __str__(self):
         return "DQN"
@@ -321,12 +338,12 @@ class DQN:
 if torch.cuda.is_available():
     torch.set_default_device('cuda')
 
-files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3', 'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
+files = ['sa', 'sb', 'sc', 'sd'] #'1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3', 'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
 
 for i in range(1000):
     print(i)
     i = i % 27
-    path = 'C:/Users/STJoh/Documents/ReinforcementProject/Retro-Learner/' + files[i] + '.bk2'
+    path = 'C:/Users/stjoh/Documents/CSCE 642/SonicRecordings/' + files[i] + '.bk2'
     movie = retro.Movie(path)
     movie.step()  # Ensure the movie is stepped to initialize its state properly
 
