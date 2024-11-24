@@ -367,6 +367,12 @@ env = ResizeObservation(env, 84)  # Resize observation
 dqn = DQN(env, movie)
 
 for i in range(40000):
+    if i == 10000:
+        dqn.epsilon = 0.8
+    elif i == 20000:
+        dqn.epsilon = 0.6
+    elif i == 30000:
+        dqn.epsilon = 0.1
     print(f"Episode {i + 1}")
     env.initial_state = movie.get_state()
     dqn.env.reset()
