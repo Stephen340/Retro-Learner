@@ -163,7 +163,7 @@ class DQN:
 
         # Number of training steps so far
         self.n_steps = 0
-        self.epsilon = 0.9  # Start with full exploration
+        self.epsilon = 0.1  # Start with full exploration
         self.epsilon_min = 0.05  # Minimum exploration
         self.epsilon_decay = 0.99999975  # Decay rate
         self.leftward_counter = 0  # Each frame with left movement
