@@ -8,55 +8,16 @@ import numpy as np
 import retro
 import torch
 import torch.nn as nn
-from torchvision import transforms
-from torchvision import transforms as T
+import matplotlib.pyplot as plt
 from torch.optim import AdamW
+from PIL import Image
+from torchvision import transforms as T
 from gym import ObservationWrapper
 from gym.spaces import Box
-from PIL import Image
-import matplotlib.pyplot as plt
 from gym import Wrapper
 
-rewards_per_episode = []
+total_reward = []
 
-def convertAct(action):
-    if action[1] or action[8]:  # There are three jump buttons; capture all in action[0]
-        action[0] = 1
-
-    if action[6]:
-        return 4  # left
-
-    if action[0]:  # Jump is pressed
-        if action[7]:
-            return 3  # Jump, Right
-        elif action[5]:
-            return 0  # Jump, Down
-        else:
-            return 2  # Jump
-
-    if action[5]:  # Down is pressed
-        if action[7]:
-            return 5  # Down, Right
-        else:
-            return 0  # Down
-
-    if action[7]:
-        return 1  # right
-
-    return 0  # no action / none of the above
-
-
-action_switch = {
-    0: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],  # Down
-    1: [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],  # Right
-    2: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  # B
-    3: [1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],  # Right, B
-    4: [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],  # Left
-    5: [0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0]  # Right, Down
-}
-
-def convertActBack(actionID):
-    return action_switch[actionID]
 
 class FrameSkip(Wrapper):
     def __init__(self, env, skip=4):
@@ -86,7 +47,9 @@ class ResizeObservation(ObservationWrapper):
         self.observation_space = Box(low=0, high=255, shape=obs_shape, dtype=np.uint8)
 
     def observation(self, observation):
-        # Convert numpy array to PIL image
+        # Ensure observation is a numpy array
+        if isinstance(observation, torch.Tensor):
+            observation = observation.cpu().numpy()
         observation = Image.fromarray(observation)
 
         # Apply transformations: resize to specified shape and grayscale, then normalize and convert to tensor
@@ -98,6 +61,41 @@ class ResizeObservation(ObservationWrapper):
         ])
         observation = transform(observation)
         return observation
+
+
+def convertAct(action):
+    if action[-1] == 1:  # Jumping
+        if action[-2] == 1:  # Moving right
+            return 3
+        elif action[-3] == 1:  # Moving left
+            return 5
+        else:
+            return 2  # Jumping
+    else:
+        if action[-2] == 1:  # Not jumping moving right
+            return 1
+        elif action[-3] == 1:  # Not jumping moving left
+            return 4
+        else:
+            return 0  # Standing still
+
+
+def convertActBack(actionID):
+    if actionID == 0:
+        return [0, 0, 0, 0, 0, 0, 0, 0, 0]
+    elif actionID == 1:
+        return [0, 0, 0, 0, 0, 0, 0, 1, 0]
+    elif actionID == 2:
+        return [0, 0, 0, 0, 0, 0, 0, 0, 1]
+    elif actionID == 3:
+        return [0, 0, 0, 0, 0, 0, 0, 1, 1]
+    elif actionID == 4:
+        return [0, 0, 0, 0, 0, 0, 1, 0, 0]
+    elif actionID == 5:
+        return [0, 0, 0, 0, 0, 0, 1, 0, 1]
+    else:
+        # print("Unknown actionID", actionID)
+        return [0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 
 N_ACTIONS = 6
@@ -150,8 +148,8 @@ class DQN:
         for p in self.target_model.parameters():
             p.requires_grad = False
 
-        if os.path.exists('sonic_finetuning.pth'):
-            self.load_model('sonic_finetuning.pth')
+        if os.path.exists('sonic_pretrained.pth'):
+            self.load_model('sonic_pretrained.pth')
         self.model.to('cuda')
         self.target_model.to('cuda')
 
@@ -162,7 +160,8 @@ class DQN:
         self.n_steps = 0
         self.epsilon = 0.9  # Start with full exploration
         self.epsilon_min = 0.05  # Minimum exploration
-        self.epsilon_decay = 0.99999975  # Decay rate
+        self.epsilon_decay = 1.0  # Decay rate
+        self.leftward_counter = 0  # Each frame with left movement
 
     def update_target_model(self):
         # Copy weights from model to target_model
@@ -189,6 +188,38 @@ class DQN:
         self.target_model.load_state_dict(checkpoint['target_model_state_dict'])
         print(f"Model loaded from {path}")
 
+    def greedy(self, state):
+        state = state.to('cuda').float().unsqueeze(0)  # Prepare the input
+        action_values = self.model(state)  # Forward pass through the model
+
+        # Extract the 1st and 3rd index values and compute their maximum
+        indices = [1, 3]
+        selected_values = action_values[0, indices]  # Assuming action_values is 2D [batch_size, num_actions]
+        max_index = indices[torch.argmax(selected_values).item()]  # Get the index of the maximum value
+
+        return max_index
+
+    def epsilon_greedy(self, state):
+        nA = N_ACTIONS
+        # Assuming `state` is already in the right format (1, 84, 84)
+        state = state.to('cuda').float().unsqueeze(0)  # Add batch dimension for model
+        action_values = self.model(state)
+        if random.random() < self.epsilon:
+            # Random action
+            chosen_action = np.random.choice(np.arange(nA))
+            if chosen_action <= 2:
+                chosen_action = 1
+            else:
+                chosen_action = 3
+        else:
+            chosen_action = torch.argmax(action_values).item()
+        return chosen_action
+
+    def decay_epsilon(self):
+        if self.epsilon > self.epsilon_min:
+            # print(self.epsilon * self.epsilon_decay)
+            self.epsilon *= self.epsilon_decay
+
     def compute_target_values(self, next_states, rewards, dones):
         next_q_vals = self.target_model(next_states)  # Shape should be (64 * 4, num_actions)
         best_next_q_vals = torch.max(next_q_vals, dim=1)[0]  # Shape should be (64 * 4)
@@ -199,20 +230,21 @@ class DQN:
 
     def myreward(self, info, previnfo):
         # Calculate positions
-        pxpos = previnfo['x']
-        xpos = info['x']
-
-        # Check status flags
-        isDead = info['lives'] < 3
-        if isDead:
-            return -100
-        isFlag = info['level_end_bonus'] > 0
-        if isFlag:
-            return 2000  # Reward for reaching the flag
+        pxpos = previnfo['x_position2'] + previnfo['xscrollLo'] + 256 * previnfo['xscrollHi']
+        xpos = info['x_position2'] + info['xscrollLo'] + 256 * info['xscrollHi']
 
         # Calculate changes
         dpos = xpos - pxpos  # Change in x position
-        dtime = -1  # Change in time
+        dtime = info['time'] - previnfo['time']  # Change in time
+
+        # Check status flags
+        isDead = info['player_state'] == 6 or info['player_state'] == 11
+        if isDead:
+            return -100
+        isFlag = info['player_state'] == 4
+        if isFlag:
+            print('FFFFFFFFFFFFFFFLLLLLLLLLLLLLLLLLLLLLAAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGGGGGGGGGGGGGGGGGGGG')
+            return 5000 + dpos * 2 if dpos > 0 else -5  # Reward for reaching the flag
 
         # Reward components
         rightward_reward = dpos * 2 if dpos > 0 else -5  # 2x reward for moving right, -5 for left
@@ -259,9 +291,8 @@ class DQN:
             current_q = current_q.view(16, 4, -1)  # Reshape back to (batch_size, chunk_size, num_actions)
 
             # Gather Q-values for actions taken in replay memory
-            actions = actions.unsqueeze(-1)  # Shape (16, 4, 1) to match current_q for gather
-
-            current_q = torch.gather(current_q, dim=2, index=actions).squeeze(-1)  # Shape (16, 4)
+            actions = actions.unsqueeze(-1)  # Shape (64, 4, 1) to match current_q for gather
+            current_q = torch.gather(current_q, dim=2, index=actions).squeeze(-1)  # Shape (64, 4)
 
             with torch.no_grad():
                 # Compute target Q-values
@@ -292,66 +323,57 @@ class DQN:
         if len(self.sequence_buffer) == self.chunk_size:
             self.replay_memory.append(list(self.sequence_buffer))
 
-    def epsilon_greedy(self, state):
-        nA = N_ACTIONS
-        # Assuming `state` is already in the right format (1, 84, 84)
-        state = state.to('cuda').float().unsqueeze(0)  # Add batch dimension for model
-        action_values = self.model(state)
-        if random.random() < self.epsilon:
-            # Random action
-            chosen_action = np.random.choice(np.arange(nA))
-        else:
-            chosen_action = torch.argmax(action_values).item()
-        return chosen_action
-
-    def greedy(self, state):
-        state = state.to('cuda').float().unsqueeze(0)
-        action_values = self.model(state)
-        # print(action_values)
-        return torch.argmax(action_values).item()
-
-    def train_episode(self):
+    def train_episode_finetuning(self, save_index):
+        full_reward = 0
         state = self.env.reset()
-        prev_info = None
+        previnfo = None
+
         for _ in range(131072):  # Self.options.steps
-            # If a movie is loaded, step through the movie instead
+            # Choose action with exploration
             chosen_action_id = self.epsilon_greedy(state)
             chosen_action = convertActBack(chosen_action_id)
 
-            # step through the environment with the chosen action
             next_state, reward, done, info = self.env.step(chosen_action)
+            if previnfo is not None:
+                reward = self.myreward(info, previnfo)
+            else:
+                reward = 0
+            full_reward += reward
 
-            if prev_info is not None:
-                reward = self.myreward(info, prev_info)
-            prev_info = info
-            # print(reward)
-            rewards_per_episode.append(reward)
-
-            # update replay memory & model
+            # Store in replay buffer and learn from experience
             self.memorize(state, chosen_action_id, reward, next_state, done)
             self.replay()
             self.env.render()
 
-            # Update variables for next step
-            state = next_state
-            self.n_steps += 1
-            if self.n_steps % 40000 == 0:
-                print("UPDATE")
-                self.update_target_model()
-
             if done:
                 break
 
-        # self.save_model("sonic_pretrained.pth")
+            state = next_state
+            self.n_steps += 1
+            if self.n_steps % 50000 == 0:
+                self.update_target_model()
+                print("Update")
+
+            previnfo = info
+        total_reward.append(full_reward)
+        # Decay epsilon after each episode
+        self.decay_epsilon()
+        print(self.epsilon)
 
     def __str__(self):
         return "DQN"
 
 
 if torch.cuda.is_available():
+    print("GPU")
     torch.set_default_device('cuda')
 
-movie = retro.Movie('C:/Users/stjoh/Documents/CSCE 642/SonicRecordings/sa.bk2')
+files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3',
+         'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
+path = 'C:/Users/stjoh/Documents/CSCE 642/' + 'a' + '.bk2'
+
+# Initialize movie and environment once
+movie = retro.Movie(path)
 env = retro.make(
     game=movie.get_game(),
     state=None,
@@ -366,17 +388,32 @@ env = ResizeObservation(env, 84)  # Resize observation
 # Initialize DQN only once
 dqn = DQN(env, movie)
 
-for i in range(40000):
-    print(f"Episode {i + 1}")
+# Optionally load the model if you have pre-saved weights
+if os.path.exists('sonic_pretrained.pth'):
+    dqn.load_model('sonic_pretrained.pth')
+
+# Main training loop across episodes
+for i in range(90000):
+    print(f"Starting episode {i}")
     env.initial_state = movie.get_state()
     dqn.env.reset()
-    dqn.train_episode()
-    dqn.save_model("sonic_finetuning.pth")
+    # Train for one episode
+    dqn.train_episode_finetuning(i)
+
+    # Save model after each episode or as desired
+    dqn.save_model('sonic_to_mario_finetuned.pth')
 
     if i % 1000 == 0:
         # Plot rewards
-        plt.plot(rewards_per_episode)
+        plt.figure(figsize=(10, 6))
+        plt.plot(total_reward, label='Episode Reward')
         plt.xlabel('Episode')
         plt.ylabel('Total Reward')
-        plt.title('Rewards Per Episode')
-        plt.savefig('rewards_per_episode_sonic.png')
+        plt.title('Total Reward per Episode')
+        plt.legend()
+        plt.grid()
+        plt.savefig('episode_rewards.png')
+        plt.close()
+
+# Close the environment when training is done
+env.close()
