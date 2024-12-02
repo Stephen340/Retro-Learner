@@ -162,7 +162,7 @@ class DQN:
         self.n_steps = 0
         self.epsilon = 0.9  # Start with full exploration
         self.epsilon_min = 0.05  # Minimum exploration
-        self.epsilon_decay = 0.99999975  # Decay rate
+        self.epsilon_decay = 0.99999  # Decay rate
 
     def update_target_model(self):
         # Copy weights from model to target_model
