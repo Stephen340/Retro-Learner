@@ -16,7 +16,9 @@ from gym import ObservationWrapper
 from gym.spaces import Box
 from gym import Wrapper
 
-MODEL_PATH = 'mario_downsized2.pth'
+total_reward = []
+cumulative_reward = []
+
 
 class FrameSkip(Wrapper):
     def __init__(self, env, skip=4):
