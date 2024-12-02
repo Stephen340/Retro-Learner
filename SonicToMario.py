@@ -17,6 +17,7 @@ from gym.spaces import Box
 from gym import Wrapper
 
 total_reward = []
+cumulative_reward = []
 
 
 class FrameSkip(Wrapper):
@@ -148,8 +149,8 @@ class DQN:
         for p in self.target_model.parameters():
             p.requires_grad = False
 
-        if os.path.exists('sonic_pretrained.pth'):
-            self.load_model('sonic_pretrained.pth')
+        if os.path.exists('sonic_finetuning.pth'):
+            self.load_model('sonic_finetuning.pth')
         self.model.to('cuda')
         self.target_model.to('cuda')
 
@@ -343,7 +344,7 @@ class DQN:
             # Store in replay buffer and learn from experience
             self.memorize(state, chosen_action_id, reward, next_state, done)
             self.replay()
-            self.env.render()
+            # self.env.render()
 
             if done:
                 break
@@ -356,8 +357,11 @@ class DQN:
 
             previnfo = info
         total_reward.append(full_reward)
-        # Decay epsilon after each episode
-        self.decay_epsilon()
+        if len(cumulative_reward) == 0:
+            cumulative_reward.append(full_reward)
+        else:
+            cumulative_reward.append(full_reward + cumulative_reward[len(cumulative_reward)-1])
+
         print(self.epsilon)
 
     def __str__(self):
@@ -365,8 +369,13 @@ class DQN:
 
 
 if torch.cuda.is_available():
-    print("GPU")
+    num_gpus = torch.cuda.device_count()
+    print(f"{num_gpus} GPU(s) available:")
+    for i in range(num_gpus):
+        print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
     torch.set_default_device('cuda')
+    print(f"Current CUDA device index: {torch.cuda.current_device()}")
+    print(f"Current CUDA device name: {torch.cuda.get_device_name(torch.cuda.current_device())}")
 
 files = ['a', 'b', 'c', 'd', '1', '2', '3', '4', 'f1', 'f2', 'f3', 'f4', 'f5', 'g1', 'g2', 'g3', 'g4', 'p1', 'p2', 'p3',
          'p4', 'p5', 'x', 'y', 'z', 'l3', 'l4']
@@ -389,8 +398,8 @@ env = ResizeObservation(env, 84)  # Resize observation
 dqn = DQN(env, movie)
 
 # Optionally load the model if you have pre-saved weights
-if os.path.exists('sonic_pretrained.pth'):
-    dqn.load_model('sonic_pretrained.pth')
+if os.path.exists('sonic_finetuning.pth'):
+    dqn.load_model('sonic_finetuning.pth')
 
 # Main training loop across episodes
 for i in range(90000):
@@ -400,10 +409,19 @@ for i in range(90000):
     # Train for one episode
     dqn.train_episode_finetuning(i)
 
-    # Save model after each episode or as desired
-    dqn.save_model('sonic_to_mario_finetuned.pth')
+    if i == 2000:
+        dqn.epsilon = 0.8
+    if i == 4000:
+        dqn.epsilon = 0.6
+    if i == 6000:
+        dqn.epsilon = 0.5
+    if i == 8000:
+        dqn.epsilon = 0.1
 
-    if i % 1000 == 0:
+    # Save model after each episode or as desired
+    dqn.save_model('sonic_finetuned_to_mario.pth')
+
+    if i % 100 == 0:
         # Plot rewards
         plt.figure(figsize=(10, 6))
         plt.plot(total_reward, label='Episode Reward')
@@ -412,7 +430,19 @@ for i in range(90000):
         plt.title('Total Reward per Episode')
         plt.legend()
         plt.grid()
-        plt.savefig('episode_rewards.png')
+        plt.savefig('sonic_finetuned_to_mario_episode_rewards.png')
+        plt.close()
+
+    if i % 100 == 0:
+        # Plot rewards
+        plt.figure(figsize=(10, 6))
+        plt.plot(cumulative_reward, label='Total Cumulative Reward')
+        plt.xlabel('Episode')
+        plt.ylabel('Cumulative Reward')
+        plt.title('Cumulative Reward over Time')
+        plt.legend()
+        plt.grid()
+        plt.savefig('sonic_finetuned_to_mario_cumulative_rewards.png')
         plt.close()
 
 # Close the environment when training is done
