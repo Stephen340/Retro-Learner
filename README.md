@@ -32,8 +32,6 @@ python -m retro.import 'C:\Users\usr\PythonProjects\Retro-Learner\SonicRom'
 
 python -m retro.import 'C:\Users\usr\PythonProjects\Retro-Learner\SMBRom'
 
-On your device, this may look more like 'C:\Users\stjoh\Documents\CSCE 642\Retro-Learner\SonicRom'
-
 With this, both ROMs and their environments, levels, states, and associated data should be imported into the repo.
 
 ## Running a Demo
