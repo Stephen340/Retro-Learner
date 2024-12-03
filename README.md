@@ -38,7 +38,7 @@ With this, both ROMs and their environments, levels, states, and associated data
 
 Running a demo is simple.
 
-Bring all 8 .pth models into the Retro-Learner workspace. There are four demo files:
+Bring all 8 .pth models into the Retro-Learner workspace. There are four demo files (MtS = Mario to Sonic, StM = Sonic to Mario):
 
 ### Demo Files
 #### Mario_Demo.py
