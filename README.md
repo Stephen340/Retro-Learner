@@ -75,5 +75,5 @@ Bring all 8 .pth models into the Retro-Learner workspace if not already done. Th
 
 Each Demo is preprogrammed to run the finetuned version of the associated model. This can be manually updated in the python file to the pretrained version if desired.
 
-Once the desired version is determined, simply run the associated file. This command may look like 'python ./MarioDemo.py' depending on your environment.
+Once the desired version is determined, simply run the associated file. This command may look like 'python ./Mario_Demo.py' depending on your environment.
 If paths are updated properly, this should begin the demo. The model cannot be interacted with, as the agent will play the game by itself.
