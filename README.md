@@ -13,7 +13,7 @@ You will need to set your Python interpreter to Python 8 for your bash environme
 
 If the interpreter is selected, and all ROM folders and models are brought into the workspace, an executable can be run to
 automate the rest of this process. Simply run the 'run_demo.sh' file using bash and the imports will install automatically, 
-the ROMs will import automatically, and the Mario_Demo.py file will run. 
+the ROMs will import automatically, and the Mario_Demo.py file will run. The installation process may take a while.
 
 This executable has been verified on a fresh system. If it does not work for some reason, we recommend following the manual process below.
 
