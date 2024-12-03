@@ -16,6 +16,9 @@ pip install -r requirements.txt
 
 Modify this command for your environment if necessary if it takes a different command.
 
+PLEASE NOTE: If your system has cached versions of these installation packages, this may mess installation up. If using an environment 
+such as PyCharm, clicking on the "Install Requirements" suggestion when the requirements.txt file is open while circumvent cache issues.
+
 Some requirements here are finicky, and may require others in order to install themselves. We have worked on the order of package installation, but in the case that
 for some reason there are issues with the initial pip installation on your machine, we recommend retrying, or manually installing the packages that failed. 
 
@@ -26,11 +29,11 @@ Once requirements are installed, the ROMS will need to be imported into Retro. B
 
 E.g., "C:\Users\usr\PythonProjects\Retro-Learner\~workspace"
 
-Once both ROM folders are in the workspace, run the following commands to import them into the repository but MAKE SURE to update the paths to your system's path to the Retro-Learner workspace:
+Once both ROM folders are in the workspace, run the following commands to import them into the repository:
 
-python -m retro.import 'C:\Users\usr\PythonProjects\Retro-Learner\SonicRom'
+python -m retro.import 'SonicRom'
 
-python -m retro.import 'C:\Users\usr\PythonProjects\Retro-Learner\SMBRom'
+python -m retro.import 'SMBRom'
 
 With this, both ROMs and their environments, levels, states, and associated data should be imported into the repo.
 
@@ -52,8 +55,5 @@ Bring all 8 .pth models into the Retro-Learner workspace. There are four demo fi
 
 Each Demo is preprogrammed to run the finetuned version of the associated model. This can be manually updated in the python file to the pretrained version if desired.
 
-Like with importing the ROMs, you will also need to manually update the path to the .pth models in the python files so that your system's path is recognized. If the DEMO file is not
-updated to recognize your system's path to the .pth file, the DEMOs will not work.
-
-Once the path is updated appropiately, simply run the associated file. This command may look like 'python ./MarioDemo.py' depending on your environment.
+Once the desired version is determined, simply run the associated file. This command may look like 'python ./MarioDemo.py' depending on your environment.
 If paths are updated properly, this should begin the demo. The model cannot be interacted with, as the agent will play the game by itself.
