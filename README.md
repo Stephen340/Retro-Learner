@@ -17,10 +17,9 @@ the ROMs will import automatically, and the Mario_Demo.py file will run. The ins
 
 This executable has been verified on a fresh system. If it does not work for some reason, we recommend following the manual process below.
 
-PLEASE NOTE: Due to this being the executable, only one demo file can run: the basic Mario Demo. If you would like to
-see other demos, read the 'Running a Demo' section below to see which files exist and how to run them. If you want to run them
+PLEASE NOTE: Due to this being the executable, only one demo file can run: the basic Mario Demo. If you want to run them
 using the .sh script, we recommend removing the 'pip install' line from the run_demo.sh file, and replacing the Mario_Demo.py file with
-whichever demo file you prefer.
+whichever demo file you prefer. See the below 'Running a Demo' section to see demo file names.
 
 If you do not want to run an executable, follow the below instructions for manual setup.
 
